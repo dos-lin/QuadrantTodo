@@ -1,0 +1,248 @@
+/* 四象限待办 全局样式表
+ * 通过 setProperty 设置的动态属性（role / badge / selected / closed）在此生效，
+ * 对应 PRD 6.4 日期状态配色、F1.4 空态、F1.7 锁定、F3.4 建议徽标等视觉约定。
+ */
+
+QWidget {
+    font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
+    font-size: 13px;
+    color: #202124;
+    background: #f5f6f8;
+}
+
+QMainWindow, QFrame {
+    background: #f5f6f8;
+}
+
+/* 左侧导航 */
+[role="nav"] {
+    background: #ffffff;
+    border-right: 1px solid #e3e6ea;
+}
+[role="nav"] QPushButton {
+    text-align: left;
+    padding: 8px 10px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+}
+[role="nav"] QPushButton:hover {
+    background: #eef1f4;
+}
+[role="nav"] QPushButton:checked {
+    background: #e8f0fe;
+    color: #1a73e8;
+    font-weight: 600;
+}
+[role="link"] {
+    color: #1a73e8;
+    border: none;
+    text-align: left;
+}
+[role="meta"] {
+    color: #5f6368;
+    font-size: 12px;
+}
+
+/* 引导条（F1.13） */
+[role="onboarding"] {
+    background: #e8f0fe;
+    color: #174ea6;
+}
+[role="onboarding"] QPushButton {
+    color: #1a73e8;
+}
+
+/* 象限面板（加深背景与边框，强化象限区分） */
+[quadrant="Q1"] { border: 1px solid #e08a7e; background: #fce7e4; }
+[quadrant="Q2"] { border: 1px solid #8fb8f2; background: #e6effd; }
+[quadrant="Q3"] { border: 1px solid #ecbf6a; background: #fcf1d6; }
+[quadrant="Q4"] { border: 1px solid #bcc1c8; background: #eceef1; }
+
+/* 象限标题按语义上色（红=重要紧急 / 蓝=重要不紧急 / 橙=紧急不重要 / 灰=不重要不紧急） */
+[quadrant="Q1"] [role="quadrant-title"] { color: #c0392b; }
+[quadrant="Q2"] [role="quadrant-title"] { color: #1a56c4; }
+[quadrant="Q3"] [role="quadrant-title"] { color: #b07800; }
+[quadrant="Q4"] [role="quadrant-title"] { color: #5f6368; }
+
+[role="quadrant-title"] {
+    font-size: 14px;
+    font-weight: 600;
+    color: #3c4043;
+}
+[role="count"] {
+    color: #5f6368;
+    font-weight: 600;
+}
+[role="section-title"] {
+    color: #80868b;
+    font-size: 12px;
+    font-weight: 600;
+}
+[role="view-title"] {
+    font-size: 16px;
+    font-weight: 600;
+    color: #202124;
+}
+[role="empty-hint"] {
+    color: #9aa0a6;
+    font-size: 12px;
+    padding: 6px;
+}
+[role="field-label"] {
+    color: #5f6368;
+    font-size: 12px;
+}
+[role="error"] {
+    color: #d93025;
+    font-size: 12px;
+}
+
+/* 添加按钮 */
+QPushButton[role="add"] {
+    color: #1a73e8;
+    border: 1px dashed #c6d7f5;
+    border-radius: 6px;
+    padding: 6px;
+    background: transparent;
+}
+QPushButton[role="add"]:hover {
+    background: #eef4fe;
+}
+
+/* 任务条目 */
+TaskItemWidget {
+    border-radius: 6px;
+    padding: 2px;
+    border-left: 3px solid transparent;
+}
+TaskItemWidget[selected="true"] {
+    background: #87CEEB;
+    border-left-color: #1a73e8;
+}
+TaskItemWidget[selected="true"] [badge="doing"] {
+    background: rgba(255, 255, 255, 0.45);
+    color: #0d5cb8;
+}
+TaskItemWidget[selected="true"] QPushButton:flat:hover {
+    background: rgba(255, 255, 255, 0.35);
+}
+TaskItemWidget[closed="true"] {
+    color: #9aa0a6;
+}
+
+QPushButton[danger="true"] {
+    color: #d93025;
+}
+
+/* 徽标 */
+[badge="doing"] {
+    color: #1a73e8;
+    background: #e8f0fe;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+}
+[badge="lock"] {
+    color: #d93025;
+    background: #fce8e6;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+}
+[badge="hint"] {
+    color: #d98700;
+    background: #fef7e0;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+}
+
+/* 通用按钮 */
+QPushButton {
+    border-radius: 6px;
+    padding: 6px 12px;
+    background: #ffffff;
+    border: 1px solid #dadce0;
+}
+QPushButton:hover {
+    background: #f1f3f4;
+}
+QPushButton:flat {
+    border: none;
+    background: transparent;
+    color: #1a73e8;
+}
+QPushButton:flat:hover {
+    background: #eef1f4;
+}
+
+/* 页签 */
+QTabWidget::pane {
+    border: none;
+    background: transparent;
+}
+QTabBar::tab {
+    background: transparent;
+    color: #5f6368;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 8px 16px;
+    font-size: 13px;
+}
+QTabBar::tab:selected {
+    color: #1a73e8;
+    border-bottom-color: #1a73e8;
+    background: transparent;
+}
+QTabBar::tab:hover:!selected {
+    color: #202124;
+    background: #f1f3f4;
+}
+
+QLineEdit, QPlainTextEdit, QDateEdit, QDateTimeEdit, QComboBox {
+    border: 1px solid #dadce0;
+    border-radius: 6px;
+    padding: 5px 8px;
+    background: #ffffff;
+}
+QLineEdit:focus, QPlainTextEdit:focus, QDateEdit:focus, QDateTimeEdit:focus, QComboBox:focus {
+    border: 1px solid #1a73e8;
+}
+
+QComboBox QAbstractItemView {
+    background: #ffffff;
+    border: 1px solid #dadce0;
+}
+
+/* 列表与滚动区（保持透明以透出面板底色） */
+QListWidget, QScrollArea {
+    background: transparent;
+    border: none;
+}
+
+/* 日历格（PRD F17） */
+[role="cal-cell"] {
+    background: #ffffff;
+    border: 1px solid #e3e6ea;
+    border-radius: 4px;
+}
+[role="cal-cell"][today="true"] {
+    background: #eef4fe;
+    border: 1px solid #1a73e8;
+}
+[role="cal-daynum"] {
+    color: #5f6368;
+}
+[role="cal-more"] {
+    color: #1a73e8;
+}
+[role="cal-overdue"] {
+    color: #d93025;
+}
+
+/* 撤销条（PRD F5.7） */
+[role="undo"] {
+    background: #ffffff;
+    border-top: 1px solid #e3e6ea;
+}

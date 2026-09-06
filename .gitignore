@@ -1,0 +1,72 @@
+# ============================================================
+# QuadrantTodo .gitignore
+# 只提交源码 / 文档 / 构建脚本，排除运行时产物与真实数据
+#
+# 注意：.gitignore 不支持行尾注释（"dist/  # 说明" 会被整行当成
+# 匹配模式而失效）。所有注释必须独立成行。
+# ============================================================
+
+# ---------- 1. 敏感数据（含真实任务数据，禁止上传）----------
+# 根目录主库（运行期生成）
+data.db
+data.db-wal
+data.db-shm
+# 源码目录下开发期残留的库与自动备份（同样含真实数据）
+quadrant_todo/data.db
+quadrant_todo/data.db-wal
+quadrant_todo/data.db-shm
+quadrant_todo/backups/
+# 兜底：任何位置的 SQLite 文件都不进仓库
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# ---------- 2. 构建与分发产物 ----------
+# PyInstaller 产出（约 522MB）与中间产物（约 185MB）
+dist/
+build/
+# 临时验证副本（约 121MB）
+_exe_test/
+*.zip
+
+# ---------- 3. 运行时生成目录 ----------
+# 自动备份与运行日志
+backups/
+logs/
+# 根目录与源码目录下的备份目录
+quadrant_todo/backups/
+*.log
+
+# ---------- 4. Python 缓存 ----------
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+
+# ---------- 5. 本地环境 ----------
+.venv/
+venv/
+env/
+# WorkBuddy 本地记忆（含本地路径与项目记录）
+.workbuddy/
+
+# ---------- 7. 文档类（仅保留两个 README，其余不上传）----------
+# 说明：PRD、交付总结、发布准备、README 模板等属于内部/过程文档，
+# 保留在本地即可，不进仓库。两个 README 用感叹号放行。
+*.md
+*.docx
+*.doc
+*.pdf
+*.pptx
+*.xlsx
+!README.md
+
+# ---------- 6. 编辑器 / 系统 ----------
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

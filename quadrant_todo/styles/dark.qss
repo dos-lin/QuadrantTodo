@@ -1,0 +1,213 @@
+/* 深色主题覆盖层（PRD F24）。仅覆盖 styles.qss 的同名选择器。
+ * 由 theme.apply_theme 在 system=dark / dark 时叠加在 light 之后。
+ */
+
+QWidget {
+    color: #e8eaed;
+    background: #202124;
+}
+
+QMainWindow, QFrame {
+    background: #202124;
+}
+
+/* 左侧导航 */
+[role="nav"] {
+    background: #2a2b2e;
+    border-right: 1px solid #3c4043;
+}
+[role="nav"] QPushButton:hover {
+    background: #353639;
+}
+[role="nav"] QPushButton:checked {
+    background: #313347;
+    color: #8ab4f8;
+}
+[role="link"] {
+    color: #8ab4f8;
+}
+[role="meta"] {
+    color: #9aa0a6;
+}
+
+/* 引导条 */
+[role="onboarding"] {
+    background: #1f2a3a;
+    color: #8ab4f8;
+}
+[role="onboarding"] QPushButton {
+    color: #8ab4f8;
+}
+
+/* 象限面板（深色下提亮边框与背景，强化象限区分） */
+[quadrant="Q1"] { border: 1px solid #8a4f47; background: #4a2b27; }
+[quadrant="Q2"] { border: 1px solid #4a6a90; background: #26344a; }
+[quadrant="Q3"] { border: 1px solid #8a7038; background: #4a3c20; }
+[quadrant="Q4"] { border: 1px solid #585f65; background: #34373b; }
+
+/* 象限标题按语义上色 */
+[quadrant="Q1"] [role="quadrant-title"] { color: #f28b82; }
+[quadrant="Q2"] [role="quadrant-title"] { color: #8ab4f8; }
+[quadrant="Q3"] [role="quadrant-title"] { color: #fdd663; }
+[quadrant="Q4"] [role="quadrant-title"] { color: #c0c4c8; }
+
+[role="quadrant-title"] {
+    color: #e8eaed;
+}
+[role="count"] {
+    color: #9aa0a6;
+}
+[role="section-title"] {
+    color: #9aa0a6;
+}
+[role="view-title"] {
+    color: #e8eaed;
+}
+[role="empty-hint"] {
+    color: #80868b;
+}
+[role="field-label"] {
+    color: #9aa0a6;
+}
+[role="error"] {
+    color: #f28b82;
+}
+
+/* 添加按钮 */
+QPushButton[role="add"] {
+    color: #8ab4f8;
+    border: 1px dashed #34465e;
+    background: transparent;
+}
+QPushButton[role="add"]:hover {
+    background: #2a2b2e;
+}
+
+/* 任务条目 */
+TaskItemWidget[selected="true"] {
+    background: #313347;
+    border-left-color: #8ab4f8;
+}
+TaskItemWidget[closed="true"] {
+    color: #80868b;
+}
+
+QPushButton[danger="true"] {
+    color: #f28b82;
+}
+
+/* 徽标 */
+[badge="doing"] {
+    color: #8ab4f8;
+    background: #313347;
+}
+[badge="lock"] {
+    color: #f28b82;
+    background: #3a2422;
+}
+[badge="hint"] {
+    color: #fdd663;
+    background: #3a2f1a;
+}
+
+/* 通用按钮 */
+QPushButton {
+    background: #2a2b2e;
+    border: 1px solid #3c4043;
+    color: #e8eaed;
+}
+QPushButton:hover {
+    background: #353639;
+}
+QPushButton:flat {
+    color: #8ab4f8;
+}
+QPushButton:flat:hover {
+    background: #353639;
+}
+
+/* 页签 */
+QTabWidget::pane {
+    border: none;
+    background: transparent;
+}
+QTabBar::tab {
+    background: transparent;
+    color: #9aa0a6;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 8px 16px;
+    font-size: 13px;
+}
+QTabBar::tab:selected {
+    color: #8ab4f8;
+    border-bottom-color: #8ab4f8;
+    background: transparent;
+}
+QTabBar::tab:hover:!selected {
+    color: #e8eaed;
+    background: #353639;
+}
+
+QLineEdit, QPlainTextEdit, QDateEdit, QDateTimeEdit, QComboBox {
+    border: 1px solid #3c4043;
+    background: #2a2b2e;
+    color: #e8eaed;
+}
+QLineEdit:focus, QPlainTextEdit:focus, QDateEdit:focus, QDateTimeEdit:focus, QComboBox:focus {
+    border: 1px solid #8ab4f8;
+}
+QComboBox QAbstractItemView {
+    background: #2a2b2e;
+    color: #e8eaed;
+    selection-background-color: #313347;
+}
+
+/* 列表与滚动区 */
+QListWidget, QScrollArea {
+    background: transparent;
+    border: none;
+}
+QScrollBar:vertical, QScrollBar:horizontal {
+    background: #2a2b2e;
+}
+QScrollBar::handle {
+    background: #5f6368;
+    border-radius: 3px;
+}
+
+/* 日历格（PRD F17） */
+[role="cal-cell"] {
+    background: #2a2b2e;
+    border: 1px solid #3c4043;
+    border-radius: 4px;
+}
+[role="cal-cell"][today="true"] {
+    background: #1f2a3a;
+    border: 1px solid #8ab4f8;
+}
+[role="cal-daynum"] {
+    color: #c4c7cc;
+}
+[role="cal-more"] {
+    color: #8ab4f8;
+}
+[role="cal-overdue"] {
+    color: #f28b82;
+}
+
+/* 撤销条 */
+[role="undo"] {
+    background: #2a2b2e;
+    border-top: 1px solid #3c4043;
+}
+
+/* 复选框 / 弹窗元素（跟随 Fusion 默认深色） */
+QCheckBox {
+    color: #e8eaed;
+}
+
+/* 设置对话框：内嵌分隔标题 */
+[role="field-label"] {
+    color: #9aa0a6;
+}
