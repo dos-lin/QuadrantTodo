@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS task (
@@ -99,12 +99,13 @@ CREATE TABLE IF NOT EXISTS pomodoro_session (
 CREATE INDEX IF NOT EXISTS idx_pomo_task  ON pomodoro_session(task_id);
 CREATE INDEX IF NOT EXISTS idx_pomo_start ON pomodoro_session(started_at);
 
--- 小便签（脱离四象限，PRD F19）
+-- 小便签（脱离四象限，PRD F19；V1.0.1 新增 locked 字段）
 CREATE TABLE IF NOT EXISTS sticky_note (
     id          TEXT PRIMARY KEY,
     content     TEXT NOT NULL,
     color       TEXT NOT NULL DEFAULT '#FFF9C4',
     pinned      INTEGER NOT NULL DEFAULT 0,
+    locked      INTEGER NOT NULL DEFAULT 0,
     sort_order  INTEGER NOT NULL DEFAULT 0,
     created_at  TEXT NOT NULL,
     updated_at  TEXT
@@ -191,6 +192,15 @@ def _apply_migrations(conn: sqlite3.Connection, from_version: int) -> None:
                 "INSERT OR IGNORE INTO setting (key, value) VALUES (?, ?)", (key, value)
             )
         conn.commit()
+
+    if from_version < 4:
+        # V1.0.1：便签新增 locked 字段（锁定后禁止删除）
+        # 旧库可能没有 locked 列；用 try/except 兼容重复迁移
+        try:
+            conn.execute("ALTER TABLE sticky_note ADD COLUMN locked INTEGER NOT NULL DEFAULT 0")
+        except sqlite3.OperationalError:
+            # 字段已存在（开发期重复迁移），忽略
+            pass
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:

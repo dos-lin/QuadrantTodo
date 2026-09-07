@@ -31,8 +31,8 @@ def main() -> int:
     db = Database(tmp_db)
     db.connect()
 
-    # ---- 0) schema 已升到 v3，五张新表齐备 ----
-    assert migration.current_version(db.conn) == 3, "schema 应为 v3"
+    # ---- 0) schema 已升到 v4（V1.0.1 新增便签 locked 列），五张新表齐备 ----
+    assert migration.current_version(db.conn) == 4, "schema 应为 v4"
     tables = {
         r[0]
         for r in db.conn.execute(

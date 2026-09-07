@@ -73,7 +73,7 @@ from .views.quickadd import QuickAddWindow
 from .views.search import SearchView
 from .views.settings import SettingsDialog, set_autostart
 from .views.stats import StatsView
-from .views.sticky import StickyFloater, StickyView
+from .views.sticky import StickyFloater, StickyMaximizeWindow, StickyView
 from .views.tags import TagsView
 from .views.unscheduled import UnscheduledView
 
@@ -136,6 +136,7 @@ class MainWindow(QMainWindow):
         self.sticky_filter_keyword: str = ""  # 搜索词同时过滤便签页
         self.active_tag_ids: set[str] = set()
         self._sticky_floaters: dict[str, StickyFloater] = {}
+        self._sticky_max_window: StickyMaximizeWindow | None = None  # V1.0.1：便签最大化窗口
         self._pomodoro: PomodoroTimer | None = None
         self._pomodoro_task_id: str | None = None
 
@@ -431,6 +432,7 @@ class MainWindow(QMainWindow):
         self.sticky_view.update_requested.connect(self.on_sticky_update)
         self.sticky_view.delete_requested.connect(self.on_sticky_delete)
         self.sticky_view.filter_clear_requested.connect(self.on_sticky_filter_cleared)
+        self.sticky_view.maximize_requested.connect(self._open_sticky_max_window)  # V1.0.1
 
         # F18 热力图年份切换
         self.heatmap_view.year_changed.connect(self._render_heatmap)
@@ -477,9 +479,30 @@ class MainWindow(QMainWindow):
     # ================================================================ 数据
 
     def reload(self) -> None:
-        self.tasks = self.db.all_tasks()
+        self.tasks = self._sort_for_display(self.db.all_tasks())
         self.refresh_views()
         self.data_changed.emit()
+
+    @staticmethod
+    def _sort_for_display(tasks: list) -> list:
+        """V1.0.1：统一任务列表展示顺序。
+
+        排序优先级（用户决策）：
+            1. 进行中（status='doing'）排最前
+            2. 按 due_date 升序（无截止日期排最后，逾期自然靠前）
+            3. 保持原 sort_order（用户拖拽的手动排序）
+            4. 创建时间作为最终稳定兜底
+        """
+        def _due_key(t):
+            if getattr(t, "due_date", None) is None:
+                return (1, 0)  # 无日期归入第二组（排后）
+            return (0, t.due_date.toordinal())
+
+        def _key(t):
+            is_doing = 0 if getattr(t, "status", "") == "doing" else 1
+            return (is_doing, _due_key(t), getattr(t, "sort_order", 0), getattr(t, "created_at", None))
+
+        return sorted(tasks, key=_key)
 
     def refresh_views(self) -> None:
         """刷新视图。
@@ -554,10 +577,13 @@ class MainWindow(QMainWindow):
         )
 
     def _render_sticky(self) -> None:
-        """F19.1：便签列表。与任务完全隔离；有搜索词时仅显示匹配便签。"""
+        """F19.1：便签列表。与任务完全隔离；有搜索词时仅显示匹配便签。
+        V1.0.1：同时把同一份数据渲染到「最大化」独立窗口（若已打开），保证两边同步。"""
         keyword = self.sticky_filter_keyword
         notes = self.db.search_stickies(keyword) if keyword else self.db.get_stickies()
         self.sticky_view.render(notes, keyword=keyword or None)
+        if self._sticky_max_window is not None:
+            self._sticky_max_window.render(notes, keyword=keyword or None)
 
     def _render_stats(self) -> None:
         """F23.5：计时统计（把 task_id 排行映射为任务标题）。"""
@@ -849,6 +875,8 @@ class MainWindow(QMainWindow):
                     self._open_sticky_floater(note)
                 else:
                     self._close_sticky_floater(note.id)
+            elif field == "locked":  # V1.0.1
+                note.locked = bool(value)
             self.db.save_sticky(note)
             break
         self.refresh_views()
@@ -859,7 +887,9 @@ class MainWindow(QMainWindow):
         self.refresh_views()
 
     def _open_sticky_floater(self, note: StickyNote) -> None:
-        """F19.3：打开（或复用）常驻浮层。"""
+        """F19.3：打开（或复用）常驻浮层。
+        V1.0.1：默认定位在屏幕最右侧，垂直居中；多个常驻便签依次向左错开避免重叠。
+        """
         existing = self._sticky_floaters.get(note.id)
         if existing is not None:
             existing.show()
@@ -868,7 +898,20 @@ class MainWindow(QMainWindow):
         floater = StickyFloater(note)
         floater.close_requested.connect(self._close_sticky_floater)
         self._sticky_floaters[note.id] = floater
+        self._position_sticky_floater(floater)
         floater.show()
+
+    @staticmethod
+    def _position_sticky_floater(floater: StickyFloater) -> None:
+        """V1.0.1：默认放在屏幕最右侧（垂直居中）。同屏多便签时由调用方控制左右错开。"""
+        screen = floater.screen()
+        if screen is None:
+            return
+        geo = screen.availableGeometry()
+        margin = 16
+        x = geo.x() + geo.width() - floater.width() - margin
+        y = geo.y() + (geo.height() - floater.height()) // 2
+        floater.move(x, y)
 
     def _close_sticky_floater(self, note_id: str) -> None:
         """F19.4：关闭浮层仅隐藏，便签数据与 pinned 标记均保留。"""
@@ -877,10 +920,60 @@ class MainWindow(QMainWindow):
             floater.close()
             floater.deleteLater()
 
+    def _open_sticky_max_window(self) -> None:
+        """V1.0.1：打开便签「最大化」独立顶级窗口。复用主窗口的渲染数据。"""
+        if self._sticky_max_window is not None:
+            self._sticky_max_window.show()
+            self._sticky_max_window.raise_()
+            self._sticky_max_window.activateWindow()
+            return
+        win = StickyMaximizeWindow(self)
+        win.closed.connect(self._on_sticky_max_window_closed)
+        # 复用主窗口的信号，便签在两处都能编辑
+        win.sticky_view.add_requested.connect(self.on_sticky_add)
+        win.sticky_view.update_requested.connect(self.on_sticky_update)
+        win.sticky_view.delete_requested.connect(self.on_sticky_delete)
+        win.sticky_view.filter_clear_requested.connect(self.on_sticky_filter_cleared)
+        self._sticky_max_window = win
+        self._render_sticky_max_window()
+        win.show()
+
+    def _on_sticky_max_window_closed(self) -> None:
+        """最大化窗口关闭时清空引用，避免重复弹出已销毁对象。"""
+        self._sticky_max_window = None
+
+    def _render_sticky_max_window(self) -> None:
+        """把当前便签数据渲染到最大化窗口（与主视图同源）。"""
+        if self._sticky_max_window is None:
+            return
+        notes = self._filtered_stickies()
+        self._sticky_max_window.render(notes, keyword=self.sticky_filter_keyword or None)
+
+    def _filtered_stickies(self) -> list[StickyNote]:
+        """V1.0.1：与主便签视图同口径——根据 sticky_filter_keyword 过滤。
+        与 sticky_view.render 内使用的逻辑保持一致，避免两个窗口数据不同步。"""
+        notes = self.db.get_stickies()
+        kw = (self.sticky_filter_keyword or "").strip().lower()
+        if not kw:
+            return notes
+        return [n for n in notes if kw in n.content.lower()]
+
     def restore_pinned_stickies(self) -> None:
-        """启动时按 pinned 恢复常驻浮层（PRD F19.5）。"""
-        for note in self.db.get_pinned_stickies():
+        """启动时按 pinned 恢复常驻浮层（PRD F19.5）。
+        V1.0.1：多个便签依次向左错开，避免在屏幕最右端堆叠重叠。"""
+        for i, note in enumerate(self.db.get_pinned_stickies()):
             self._open_sticky_floater(note)
+            if i > 0 and self._sticky_floaters.get(note.id) is not None:
+                floater = self._sticky_floaters[note.id]
+                # 多个常驻便签：每个向左偏移 232px（220 宽 + 12 间距）
+                screen = floater.screen()
+                if screen is None:
+                    continue
+                geo = screen.availableGeometry()
+                margin = 16
+                x = geo.x() + geo.width() - floater.width() * (i + 1) - 12 * i - margin
+                y = geo.y() + (geo.height() - floater.height()) // 2
+                floater.move(x, y)
 
     # ================================================================ 任务操作
 

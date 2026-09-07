@@ -362,6 +362,7 @@ class StickyNote:
     id: str = field(default_factory=lambda: uuid.uuid4().hex)
     color: str = "#FFF9C4"
     pinned: bool = False
+    locked: bool = False  # V1.0.1：锁定后禁止删除（删除按钮隐藏）
     sort_order: int = 0
     created_at: datetime = field(default_factory=now)
     updated_at: Optional[datetime] = None
@@ -372,6 +373,7 @@ class StickyNote:
             "content": self.content,
             "color": self.color,
             "pinned": 1 if self.pinned else 0,
+            "locked": 1 if self.locked else 0,
             "sort_order": self.sort_order,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
@@ -384,6 +386,7 @@ class StickyNote:
             content=row["content"],
             color=row["color"] or "#FFF9C4",
             pinned=bool(row["pinned"]),
+            locked=bool(row["locked"]) if "locked" in row.keys() else False,
             sort_order=int(row["sort_order"] or 0),
             created_at=cls._parse_datetime(row["created_at"]) or now(),
             updated_at=cls._parse_datetime(row["updated_at"]),
@@ -396,6 +399,7 @@ class StickyNote:
             "content": self.content,
             "color": self.color,
             "pinned": 1 if self.pinned else 0,
+            "locked": 1 if self.locked else 0,  # V1.0.1
             "sortOrder": self.sort_order,
             "createdAt": self.created_at.isoformat(),
             "updatedAt": self.updated_at.isoformat() if self.updated_at else None,
@@ -409,6 +413,7 @@ class StickyNote:
             content=data.get("content", ""),
             color=data.get("color") or "#FFF9C4",
             pinned=bool(data.get("pinned", 0)),
+            locked=bool(data.get("locked", 0)),  # V1.0.1：旧导出文件无此字段时回退 False
             sort_order=int(data.get("sortOrder", 0) or 0),
             created_at=cls._parse_datetime(data.get("createdAt")) or now(),
             updated_at=cls._parse_datetime(data.get("updatedAt")),

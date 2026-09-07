@@ -272,7 +272,9 @@ class QuadrantPanel(QFrame):
         threshold: int,
         selected_id: str | None,
     ) -> None:
-        self.count_label.setText(str(len(active)))
+        # V1.0.1：右上角显示「共 N 条」格式（原仅显示数字）
+        n = len(active)
+        self.count_label.setText(f"共 {n} 条")
         has_active = bool(active)
         self.empty_hint.setVisible(not has_active)
         # 列表区始终可见：空象限也保持和右上 Q2 一样的完整面板高度（透明背景透出象限色）

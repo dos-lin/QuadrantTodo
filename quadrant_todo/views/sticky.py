@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -41,6 +42,7 @@ class StickyView(QWidget):
     update_requested = Signal(str, str, object)  # (id, field, value)
     delete_requested = Signal(str)
     filter_clear_requested = Signal()  # 清除搜索词过滤
+    maximize_requested = Signal()     # V1.0.1：点击头部「最大化」按钮
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -60,6 +62,12 @@ class StickyView(QWidget):
         self.clear_filter_btn.setVisible(False)
         self.clear_filter_btn.clicked.connect(self.filter_clear_requested.emit)
         bar.addWidget(self.clear_filter_btn)
+        # V1.0.1：最大化按钮（独立顶级窗口查看全部便签）
+        self.maximize_btn = QPushButton("最大化")
+        self.maximize_btn.setFlat(True)
+        self.maximize_btn.setToolTip("在新窗口中查看全部便签")
+        self.maximize_btn.clicked.connect(self.maximize_requested.emit)
+        bar.addWidget(self.maximize_btn)
         new_btn = QPushButton("新建便签")
         new_btn.clicked.connect(lambda: self._on_add())
         bar.addWidget(new_btn)
@@ -74,7 +82,6 @@ class StickyView(QWidget):
         self.list_area.setSpacing(8)
         container = QWidget()
         container.setLayout(self.list_area)
-        from PySide6.QtWidgets import QScrollArea
         area = QScrollArea()
         area.setWidgetResizable(True)
         area.setWidget(container)
@@ -138,11 +145,32 @@ class StickyView(QWidget):
         pin_btn.clicked.connect(lambda _checked, nid=note.id: self.update_requested.emit(nid, "pinned", not note.pinned))
         row.addWidget(pin_btn)
 
-        del_btn = QPushButton("删除")
-        del_btn.setFlat(True)
-        del_btn.setProperty("danger", True)
-        del_btn.clicked.connect(lambda _=None, nid=note.id: self._on_delete(nid))
-        row.addWidget(del_btn)
+        # V1.0.1：锁定按钮。锁定后禁止删除（删除按钮自动隐藏，见下方）
+        lock_btn = QPushButton("🔓 解锁" if note.locked else "🔒 锁定")
+        lock_btn.setFlat(True)
+        lock_btn.setCheckable(True)
+        lock_btn.setChecked(note.locked)
+        lock_btn.setToolTip("锁定后禁止删除该便签" if not note.locked else "已锁定，点击解除")
+        lock_btn.clicked.connect(lambda _checked, nid=note.id: self.update_requested.emit(nid, "locked", not note.locked))
+        row.addWidget(lock_btn)
+
+        # V1.0.1：删除按钮在锁定时隐藏（避免误删且表达「锁定即不可删」）
+        self._del_btn_for_note: dict[str, QPushButton] = {}
+        if not note.locked:
+            del_btn = QPushButton("删除")
+            del_btn.setFlat(True)
+            del_btn.setProperty("danger", True)
+            del_btn.clicked.connect(lambda _=None, nid=note.id: self._on_delete(nid))
+            row.addWidget(del_btn)
+        else:
+            # 占位一个被隐藏的删除按钮，确保视觉对齐 + 锁定期松开后能立即复用
+            del_btn = QPushButton("删除")
+            del_btn.setFlat(True)
+            del_btn.setProperty("danger", True)
+            del_btn.setVisible(False)
+            del_btn.clicked.connect(lambda _=None, nid=note.id: self._on_delete(nid))
+            row.addWidget(del_btn)
+        self._del_btn_for_note[note.id] = del_btn
         row.addStretch(1)
         layout.addLayout(row)
         return frame
@@ -181,6 +209,62 @@ class _ContentEdit(QPlainTextEdit):
     def focusOutEvent(self, event) -> None:
         self.committed.emit(self.toPlainText().strip())
         super().focusOutEvent(event)
+
+
+class StickyMaximizeWindow(QWidget):
+    """V1.0.1：便签「最大化」独立顶级窗口。
+
+    与主窗口的 StickyView 共享信号（add/update/delete），
+    因此两边的便签始终同步。本窗口自带「还原」按钮，关闭自己回到主窗口的普通视图。
+    关闭（窗口右上 X）也视为还原。
+    """
+
+    closed = Signal()  # 窗口即将关闭（主窗口可借此清理追踪状态）
+
+    def __init__(self, parent: QWidget | None = None):
+        # 用 Tool + WindowStaysOnTopHint 让它浮在主窗口之上但不抢焦点
+        super().__init__(parent, Qt.Window)
+        self.setWindowTitle("便签 · 最大化")
+        self.resize(820, 600)
+        # 居中显示
+        screen = self.screen()
+        if screen is not None:
+            geo = screen.availableGeometry()
+            self.move(
+                geo.x() + (geo.width() - self.width()) // 2,
+                geo.y() + (geo.height() - self.height()) // 3,
+            )
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        # 顶部工具条：仅还原按钮（最大化窗口没有「最大化」按钮自己）
+        bar = QWidget()
+        bar.setProperty("role", "sticky-max-bar")
+        bar_layout = QHBoxLayout(bar)
+        bar_layout.setContentsMargins(12, 8, 12, 8)
+        bar_layout.setSpacing(8)
+        title = QLabel("便签 · 最大化")
+        title.setProperty("role", "view-title")
+        bar_layout.addWidget(title, 1)
+        restore_btn = QPushButton("还原")
+        restore_btn.clicked.connect(self.close)
+        bar_layout.addWidget(restore_btn)
+        root.addWidget(bar)
+
+        # 复用的便签内容面板（与主窗口共享信号）
+        self.sticky_view = StickyView(self)
+        # 最大化窗口本身不需要「最大化」按钮（已经最大化了），把头部那个按钮隐藏
+        self.sticky_view.maximize_btn.setVisible(False)
+        root.addWidget(self.sticky_view, 1)
+
+    def render(self, notes: list[StickyNote], keyword: str | None = None) -> None:
+        self.sticky_view.render(notes, keyword)
+
+    def closeEvent(self, event) -> None:
+        self.closed.emit()
+        super().closeEvent(event)
 
 
 class StickyAddDialog(QDialog):
