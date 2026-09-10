@@ -41,6 +41,24 @@ def _retire(path: Path) -> None:
         print(f"警告：无法改名 {path}（{exc}），打包可能失败", file=sys.stderr)
 
 
+def _clean_runtime_artifacts(build_dir: Path) -> None:
+    """移除打包/冒烟过程中生成的运行时数据文件，避免它们进入分发包。
+
+    程序默认便携模式，exe 同级目录会生成 data.db / backups / logs / app_config.ini。
+    若把这些文件打包进去，用户解压覆盖时会误把空库/测试配置覆盖掉自己的数据。
+    """
+    for name in ("data.db", "app_config.ini"):
+        path = build_dir / name
+        if path.exists() and path.is_file():
+            path.unlink()
+            print(f"已移除运行时文件：{path.name}")
+    for subdir in ("backups", "logs"):
+        path = build_dir / subdir
+        if path.exists() and path.is_dir():
+            shutil.rmtree(path)
+            print(f"已移除运行时目录：{subdir}/")
+
+
 def _collect_qt_excludes() -> list[str]:
     """裁掉用不到的 Qt 子模块，缩小产物体积（PRD F13.3）。"""
     return [
@@ -105,6 +123,9 @@ def build() -> int:
     if not BUILD_DIR.exists():
         print("打包失败：未生成产物目录", file=sys.stderr)
         return 1
+
+    # 清理打包/冒烟过程中产生的运行时数据文件，避免带入分发包覆盖用户数据
+    _clean_runtime_artifacts(BUILD_DIR)
 
     # 附带使用说明（PRD F13.6）
     if README.exists():

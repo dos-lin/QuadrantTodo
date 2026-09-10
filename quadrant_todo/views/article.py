@@ -29,8 +29,8 @@ from PySide6.QtWidgets import (
 from ..models import Article, Tag
 from .common import clear_layout
 
-#: 正文上限 100KB（按 UTF-8 字节计；中文约 3 字节/字，约 3.4 万字）
-MAX_ARTICLE_BYTES = 100 * 1024
+#: 正文上限 10 万字（按字符数计，与左下角「字」统一维度）
+MAX_ARTICLE_CHARS = 100_000
 
 
 def _escape(text: str) -> str:
@@ -54,6 +54,7 @@ class ArticleView(QWidget):
     search_requested = Signal(str)          # 搜索关键词（空字符串=清除筛选）
     tag_add_requested = Signal(str, str)    # (article_id, 标签名) 新建或复用
     tag_remove_requested = Signal(str, str) # (article_id, tag_id)
+    selection_changed = Signal(str)         # 左侧列表切换选中文章（id）
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -117,16 +118,19 @@ class ArticleView(QWidget):
         self.content_edit.textChanged.connect(self._on_content_changed)
         right_layout.addWidget(self.content_edit, 1)
 
+        # 字数、创建/修改时间、保存状态放在同一行
+        meta_bar = QHBoxLayout()
         self.word_label = QLabel()
         self.word_label.setProperty("role", "meta")
-        right_layout.addWidget(self.word_label)
-
-        status_bar = QHBoxLayout()
+        meta_bar.addWidget(self.word_label)
+        self.meta_label = QLabel()
+        self.meta_label.setProperty("role", "meta")
+        meta_bar.addWidget(self.meta_label)
+        meta_bar.addStretch(1)
         self.status_label = QLabel("未选择文章")
         self.status_label.setProperty("role", "meta")
-        status_bar.addWidget(self.status_label)
-        status_bar.addStretch(1)
-        right_layout.addLayout(status_bar)
+        meta_bar.addWidget(self.status_label)
+        right_layout.addLayout(meta_bar)
 
         right_layout.addWidget(self._build_tags_ui())
 
@@ -272,6 +276,7 @@ class ArticleView(QWidget):
         self.title_edit.setText(article.title or "")
         self.content_edit.setPlainText(article.content or "")
         self._update_word_count(article.content or "")
+        self._update_meta_label(article)
         self._render_tags()
         self._loading = False
 
@@ -284,6 +289,7 @@ class ArticleView(QWidget):
         self.content_edit.setPlaceholderText("选择或新建一篇文章以开始编辑")
         self.content_edit.clear()
         self.word_label.clear()
+        self.meta_label.clear()
         self._set_status("未选择文章", "meta")
         clear_layout(self.tag_chip_row)
         self.tag_chip_row.addStretch(1)
@@ -315,8 +321,8 @@ class ArticleView(QWidget):
             return
         article = self._articles[row]
         self._selected_id = article.id
-        self._show_article(article)
-        self._rendered_selected_id = article.id
+        # 通过信号让应用层重新渲染右侧标签与时间，避免上一篇文章标签残留
+        self.selection_changed.emit(article.id)
 
     def _on_search(self, text: str) -> None:
         self.search_requested.emit(text.strip())
@@ -341,10 +347,10 @@ class ArticleView(QWidget):
         if self._loading or not self._selected_id:
             return
         text = self.content_edit.toPlainText()
-        if len(text.encode("utf-8")) > MAX_ARTICLE_BYTES:
+        if len(text) > MAX_ARTICLE_CHARS:
             self._over_limit = True
             self.word_label.setProperty("role", "error")
-            self.word_label.setText(f"{len(text)} 字 / 100KB —— 已达上限，请删减")
+            self.word_label.setText(f"{len(text)} 字 / 10万字 —— 已达上限，请删减")
             self.style().unpolish(self.word_label)
             self.style().polish(self.word_label)
             self._set_status("内容超过上限，无法保存", "error")
@@ -371,9 +377,18 @@ class ArticleView(QWidget):
         if self._over_limit:
             return
         self.word_label.setProperty("role", "meta")
-        self.word_label.setText(f"{len(text)} 字 / 100KB")
+        self.word_label.setText(f"{len(text)} 字 / 10万字")
         self.style().unpolish(self.word_label)
         self.style().polish(self.word_label)
+
+    def _update_meta_label(self, article: Article) -> None:
+        def _fmt(dt: Optional[datetime]) -> str:
+            if dt is None:
+                return "-"
+            return dt.strftime("%Y-%m-%d %H:%M")
+        created = _fmt(article.created_at)
+        updated = _fmt(article.updated_at)
+        self.meta_label.setText(f"创建：{created}　修改：{updated}")
 
     def _on_tag_committed(self) -> None:
         if not self._selected_id:

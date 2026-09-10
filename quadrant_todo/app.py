@@ -451,6 +451,7 @@ class MainWindow(QMainWindow):
         self.article_view.search_requested.connect(self.on_article_search)
         self.article_view.tag_add_requested.connect(self.on_article_tag_add)
         self.article_view.tag_remove_requested.connect(self.on_article_tag_remove)
+        self.article_view.selection_changed.connect(self._render_article)
 
         # F18 热力图年份切换
         self.heatmap_view.year_changed.connect(self._render_heatmap)

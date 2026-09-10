@@ -20,7 +20,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from quadrant_todo.db import Database
 from quadrant_todo.models import Article, StickyNote, Subtask, Task
-from quadrant_todo.views.article import ArticleView, MAX_ARTICLE_BYTES, _highlight
+from quadrant_todo.views.article import ArticleView, MAX_ARTICLE_CHARS, _highlight
 
 
 _app: QApplication | None = None
@@ -154,7 +154,7 @@ class TestArticleView(unittest.TestCase):
         self.assertEqual(_highlight("a<b>c", "x"), "a&lt;b&gt;c")  # 转义安全
 
     def test_max_bytes_constant(self):
-        self.assertEqual(MAX_ARTICLE_BYTES, 100 * 1024)
+        self.assertEqual(MAX_ARTICLE_CHARS, 100_000)
 
     def test_render_and_search_highlight(self):
         view = ArticleView()
@@ -174,7 +174,7 @@ class TestArticleView(unittest.TestCase):
         view = ArticleView()
         view._selected_id = "x"
         view._loading = False
-        huge = "中" * (MAX_ARTICLE_BYTES // 3 + 50)  # UTF-8 下 > 100KB
+        huge = "中" * (MAX_ARTICLE_CHARS + 50)  # > 10万字
         view.content_edit.setPlainText(huge)
         view._on_content_changed()
         self.assertTrue(view._over_limit)
