@@ -363,6 +363,7 @@ class StickyNote:
     color: str = "#FFF9C4"
     pinned: bool = False
     locked: bool = False  # V1.0.1：锁定后禁止删除（删除按钮隐藏）
+    top: bool = False  # 文章模块：列表置顶（排在普通便签之前）
     sort_order: int = 0
     created_at: datetime = field(default_factory=now)
     updated_at: Optional[datetime] = None
@@ -374,6 +375,7 @@ class StickyNote:
             "color": self.color,
             "pinned": 1 if self.pinned else 0,
             "locked": 1 if self.locked else 0,
+            "top": 1 if self.top else 0,
             "sort_order": self.sort_order,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
@@ -387,6 +389,7 @@ class StickyNote:
             color=row["color"] or "#FFF9C4",
             pinned=bool(row["pinned"]),
             locked=bool(row["locked"]) if "locked" in row.keys() else False,
+            top=bool(row["top"]),
             sort_order=int(row["sort_order"] or 0),
             created_at=cls._parse_datetime(row["created_at"]) or now(),
             updated_at=cls._parse_datetime(row["updated_at"]),
@@ -400,6 +403,7 @@ class StickyNote:
             "color": self.color,
             "pinned": 1 if self.pinned else 0,
             "locked": 1 if self.locked else 0,  # V1.0.1
+            "top": 1 if self.top else 0,
             "sortOrder": self.sort_order,
             "createdAt": self.created_at.isoformat(),
             "updatedAt": self.updated_at.isoformat() if self.updated_at else None,
@@ -414,7 +418,67 @@ class StickyNote:
             color=data.get("color") or "#FFF9C4",
             pinned=bool(data.get("pinned", 0)),
             locked=bool(data.get("locked", 0)),  # V1.0.1：旧导出文件无此字段时回退 False
+            top=bool(data.get("top", 0)),
             sort_order=int(data.get("sortOrder", 0) or 0),
+            created_at=cls._parse_datetime(data.get("createdAt")) or now(),
+            updated_at=cls._parse_datetime(data.get("updatedAt")),
+        )
+
+    @staticmethod
+    def _parse_datetime(value) -> Optional[datetime]:
+        if not value:
+            return None
+        if isinstance(value, datetime):
+            return value
+        return datetime.fromisoformat(str(value))
+
+
+# ---------------------------------------------------------------- 文章（文章模块，2026-09-10）
+
+@dataclass
+class Article:
+    """文章模块：独立于任务/便签的写作单元，可打标签，不与任务关联。"""
+
+    title: str = "无标题文章"
+    id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    content: str = ""
+    created_at: datetime = field(default_factory=now)
+    updated_at: Optional[datetime] = None
+
+    def to_row(self) -> dict:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "content": self.content,
+            "created_at": self.created_at.isoformat(),
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+    @classmethod
+    def from_row(cls, row) -> "Article":
+        return cls(
+            title=row["title"] or "无标题文章",
+            id=row["id"],
+            content=row["content"] or "",
+            created_at=cls._parse_datetime(row["created_at"]) or now(),
+            updated_at=cls._parse_datetime(row["updated_at"]),
+        )
+
+    def to_export(self) -> dict:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "content": self.content,
+            "createdAt": self.created_at.isoformat(),
+            "updatedAt": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+    @classmethod
+    def from_export(cls, data: dict) -> "Article":
+        return cls(
+            title=data.get("title") or "无标题文章",
+            id=data.get("id") or uuid.uuid4().hex,
+            content=data.get("content") or "",
             created_at=cls._parse_datetime(data.get("createdAt")) or now(),
             updated_at=cls._parse_datetime(data.get("updatedAt")),
         )

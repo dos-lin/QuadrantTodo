@@ -31,8 +31,8 @@ def main() -> int:
     db = Database(tmp_db)
     db.connect()
 
-    # ---- 0) schema 已升到 v4（V1.0.1 新增便签 locked 列），五张新表齐备 ----
-    assert migration.current_version(db.conn) == 4, "schema 应为 v4"
+    # ---- 0) schema 已升到 v5（V1.0.1 新增 locked；文章模块新增 top + article 表），齐备 ----
+    assert migration.current_version(db.conn) == 5, "schema 应为 v5"
     tables = {
         r[0]
         for r in db.conn.execute(
@@ -73,8 +73,12 @@ def main() -> int:
     # 详情面板渲染子任务
     window.selected_id = parent.id
     window.reload()
-    assert window.detail.subtask_progress.text() == "1/2", (
+    # 子任务进度文案：含「须全部完成才能标记主任务完成」后缀（F20 约束提醒）
+    assert "1/2" in window.detail.subtask_progress.text(), (
         f"子任务进度应为 1/2，实际 {window.detail.subtask_progress.text()!r}"
+    )
+    assert "须全部完成才能标记主任务完成" in window.detail.subtask_progress.text(), (
+        f"子任务未全完成时应提示约束，实际 {window.detail.subtask_progress.text()!r}"
     )
     # 右侧详情面板可滚动、备注输入框高度足够（解决输入后内容被裁剪）
     assert window.detail.scroll.isVisible(), "详情面板滚动区应可见"

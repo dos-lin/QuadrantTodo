@@ -252,6 +252,9 @@ class DetailPanel(QFrame):
         cr_layout.addWidget(self.custom_rule_label)
         form.addWidget(self.custom_rule_widget)
 
+        # 子任务 / 清单（PRD F20）—— 置于备注之前（2026-09-10 用户要求）
+        form.addWidget(self._build_subtasks_ui())
+
         # 备注
         self.note_edit = QPlainTextEdit()
         self.note_edit.setPlaceholderText("备注")
@@ -262,9 +265,6 @@ class DetailPanel(QFrame):
 
         # 标签（PRD F21）
         form.addWidget(self._build_tags_ui())
-
-        # 子任务 / 清单（PRD F20）
-        form.addWidget(self._build_subtasks_ui())
 
         # 元信息
         self.meta_label = QLabel()
@@ -435,7 +435,12 @@ class DetailPanel(QFrame):
             self.subtask_list.addWidget(row)
 
         total = len(subtasks)
-        self.subtask_progress.setText(f"{done}/{total}" if total else "")
+        if total:
+            # 完成约束提示：存在未完成子任务时，主任务不能标记为完成
+            suffix = "（须全部完成才能标记主任务完成）" if done < total else ""
+            self.subtask_progress.setText(f"{done}/{total}{suffix}")
+        else:
+            self.subtask_progress.setText("")
 
     def _on_subtask_committed(self) -> None:
         if self._loading or not self.task:

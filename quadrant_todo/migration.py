@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS task (
@@ -99,7 +99,7 @@ CREATE TABLE IF NOT EXISTS pomodoro_session (
 CREATE INDEX IF NOT EXISTS idx_pomo_task  ON pomodoro_session(task_id);
 CREATE INDEX IF NOT EXISTS idx_pomo_start ON pomodoro_session(started_at);
 
--- 小便签（脱离四象限，PRD F19；V1.0.1 新增 locked 字段）
+-- 小便签（脱离四象限，PRD F19；V1.0.1 新增 locked 字段；文章模块新增 top 置顶）
 CREATE TABLE IF NOT EXISTS sticky_note (
     id          TEXT PRIMARY KEY,
     content     TEXT NOT NULL,
@@ -108,8 +108,26 @@ CREATE TABLE IF NOT EXISTS sticky_note (
     locked      INTEGER NOT NULL DEFAULT 0,
     sort_order  INTEGER NOT NULL DEFAULT 0,
     created_at  TEXT NOT NULL,
+    updated_at  TEXT,
+    top         INTEGER NOT NULL DEFAULT 0
+);
+
+-- 文章（独立模块，不与任务/便签关联，2026-09-10 文章模块）
+CREATE TABLE IF NOT EXISTS article (
+    id          TEXT PRIMARY KEY,
+    title       TEXT NOT NULL DEFAULT '无标题文章',
+    content     TEXT,
+    created_at  TEXT NOT NULL,
     updated_at  TEXT
 );
+
+-- 文章-标签关联（复用 tag 表，2026-09-10 文章模块）
+CREATE TABLE IF NOT EXISTS article_tag (
+    article_id TEXT NOT NULL,
+    tag_id     TEXT NOT NULL,
+    PRIMARY KEY (article_id, tag_id)
+);
+CREATE INDEX IF NOT EXISTS idx_articletag_tag ON article_tag(tag_id);
 """
 
 #: v2.0 新增设置项的默认值（仅写入缺失项，不覆盖用户已设值）
@@ -201,6 +219,25 @@ def _apply_migrations(conn: sqlite3.Connection, from_version: int) -> None:
         except sqlite3.OperationalError:
             # 字段已存在（开发期重复迁移），忽略
             pass
+
+    if from_version < 5:
+        # 文章模块（2026-09-10）：sticky_note.top（列表置顶）+ article 表 + article_tag 关联表
+        try:
+            conn.execute("ALTER TABLE sticky_note ADD COLUMN top INTEGER NOT NULL DEFAULT 0")
+        except sqlite3.OperationalError:
+            # 字段已存在（开发期重复迁移），忽略
+            pass
+        for stmt in (
+            "CREATE TABLE IF NOT EXISTS article ("
+            " id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '无标题文章',"
+            " content TEXT, created_at TEXT NOT NULL, updated_at TEXT)",
+            "CREATE TABLE IF NOT EXISTS article_tag ("
+            " article_id TEXT NOT NULL, tag_id TEXT NOT NULL,"
+            " PRIMARY KEY (article_id, tag_id))",
+            "CREATE INDEX IF NOT EXISTS idx_articletag_tag ON article_tag(tag_id)",
+        ):
+            conn.execute(stmt)
+        conn.commit()
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:

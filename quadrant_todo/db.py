@@ -17,6 +17,7 @@ from typing import Optional
 from . import config, migration
 from .models import (
     STATUS_DONE,
+    Article,
     PomodoroSession,
     StickyNote,
     Subtask,
@@ -349,6 +350,14 @@ class Database:
         """父任务删除时级联删除（PRD F20.4）。"""
         self._write("DELETE FROM subtask WHERE parent_id = ?", (parent_id,))
 
+    def get_incomplete_subtask_count(self, task_id: str) -> int:
+        """返回父任务下未完成的子任务数（子任务约束：须全部完成才能完成主任务）。"""
+        assert self.conn is not None
+        cur = self.conn.execute(
+            "SELECT COUNT(*) FROM subtask WHERE parent_id = ? AND done = 0", (task_id,)
+        )
+        return int(cur.fetchone()[0] or 0)
+
     # ------------------------------------------------------------ 标签（PRD F21）
 
     def create_tag(self, name: str, color: str = "#808080") -> Optional["Tag"]:
@@ -421,7 +430,10 @@ class Database:
 
     def get_stickies(self) -> list["StickyNote"]:
         assert self.conn is not None
-        cur = self.conn.execute("SELECT * FROM sticky_note ORDER BY sort_order, created_at")
+        # 文章模块：置顶的便签（top=1）排在普通便签之前
+        cur = self.conn.execute(
+            "SELECT * FROM sticky_note ORDER BY top DESC, sort_order, created_at"
+        )
         return [StickyNote.from_row(r) for r in cur.fetchall()]
 
     def get_pinned_stickies(self) -> list["StickyNote"]:
@@ -436,6 +448,65 @@ class Database:
 
     def clear_stickies(self) -> None:
         self._write("DELETE FROM sticky_note")
+
+    # ------------------------------------------------------------ 文章（文章模块，2026-09-10）
+
+    def save_article(self, article: "Article") -> None:
+        """插入或更新文章；每次保存刷新 updated_at。"""
+        article.updated_at = datetime.now()
+        row = article.to_row()
+        columns = ", ".join(row)
+        placeholders = ", ".join(f":{key}" for key in row)
+        self._write(
+            f"INSERT OR REPLACE INTO article ({columns}) VALUES ({placeholders})", row
+        )
+
+    def get_articles(self) -> list["Article"]:
+        """全部文章，按 updated_at 倒序（最近编辑的在前）。"""
+        assert self.conn is not None
+        cur = self.conn.execute(
+            "SELECT * FROM article ORDER BY updated_at DESC, created_at DESC"
+        )
+        return [Article.from_row(r) for r in cur.fetchall()]
+
+    def get_article(self, article_id: str) -> Optional["Article"]:
+        assert self.conn is not None
+        cur = self.conn.execute("SELECT * FROM article WHERE id = ?", (article_id,))
+        row = cur.fetchone()
+        return Article.from_row(row) if row else None
+
+    def delete_article(self, article_id: str) -> None:
+        """删除文章及其标签关联。"""
+        self._write("DELETE FROM article_tag WHERE article_id = ?", (article_id,))
+        self._write("DELETE FROM article WHERE id = ?", (article_id,))
+
+    def search_articles(self, keyword: str) -> list["Article"]:
+        """按标题 + 正文模糊匹配（文章模块搜索）。"""
+        assert self.conn is not None
+        kw = f"%{keyword}%"
+        cur = self.conn.execute(
+            "SELECT * FROM article WHERE title LIKE ? OR content LIKE ? "
+            "ORDER BY updated_at DESC, created_at DESC",
+            (kw, kw),
+        )
+        return [Article.from_row(r) for r in cur.fetchall()]
+
+    def get_article_tag_ids(self, article_id: str) -> list[str]:
+        assert self.conn is not None
+        cur = self.conn.execute(
+            "SELECT tag_id FROM article_tag WHERE article_id = ?", (article_id,)
+        )
+        return [r["tag_id"] for r in cur.fetchall()]
+
+    def set_article_tags(self, article_id: str, tag_ids: list[str]) -> None:
+        """用给定标签集合整体替换文章的标签关联。"""
+        assert self.conn is not None
+        self._write("DELETE FROM article_tag WHERE article_id = ?", (article_id,))
+        for tag_id in tag_ids:
+            self._write(
+                "INSERT OR IGNORE INTO article_tag (article_id, tag_id) VALUES (?, ?)",
+                (article_id, tag_id),
+            )
 
     # ------------------------------------------------------------ 番茄钟会话（PRD F23）
 

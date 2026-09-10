@@ -55,6 +55,7 @@ from .models import (
     STATUS_DOING,
     STATUS_DONE,
     STATUS_TODO,
+    Article,
     Subtask,
     StickyNote,
     Task,
@@ -73,7 +74,8 @@ from .views.quickadd import QuickAddWindow
 from .views.search import SearchView
 from .views.settings import SettingsDialog, set_autostart
 from .views.stats import StatsView
-from .views.sticky import StickyFloater, StickyMaximizeWindow, StickyView
+from .views.article import ArticleView
+from .views.sticky import StickyFloater, StickyView
 from .views.tags import TagsView
 from .views.unscheduled import UnscheduledView
 
@@ -87,8 +89,9 @@ VIEW_INDEX = {
     "search": 5,
     "tags": 6,
     "sticky": 7,
-    "stats": 8,
-    "heatmap": 9,
+    "article": 8,
+    "stats": 9,
+    "heatmap": 10,
 }
 
 #: 便签底色轮换（PRD F19.2）
@@ -134,9 +137,9 @@ class MainWindow(QMainWindow):
         self.search_keyword: str = ""
         self.search_include_closed: bool = False
         self.sticky_filter_keyword: str = ""  # 搜索词同时过滤便签页
+        self.article_filter_keyword: str = ""  # 文章模块搜索词
         self.active_tag_ids: set[str] = set()
         self._sticky_floaters: dict[str, StickyFloater] = {}
-        self._sticky_max_window: StickyMaximizeWindow | None = None  # V1.0.1：便签最大化窗口
         self._pomodoro: PomodoroTimer | None = None
         self._pomodoro_task_id: str | None = None
 
@@ -287,6 +290,11 @@ class MainWindow(QMainWindow):
         self.sticky_btn.clicked.connect(lambda: self.switch_view("sticky"))
         nav_layout.addWidget(self.sticky_btn)
 
+        self.article_btn = QPushButton("文章")
+        self.article_btn.setCheckable(True)
+        self.article_btn.clicked.connect(lambda: self.switch_view("article"))
+        nav_layout.addWidget(self.article_btn)
+
         self.stats_btn = QPushButton("计时统计")
         self.stats_btn.setCheckable(True)
         self.stats_btn.clicked.connect(lambda: self.switch_view("stats"))
@@ -326,6 +334,8 @@ class MainWindow(QMainWindow):
         self.sticky_view = StickyView()
         self.stats_view = StatsView()
         self.heatmap_view = HeatmapView()
+        # 文章模块（2026-09-10）
+        self.article_view = ArticleView()
         for view in (
             self.board_view,
             self.daily_view,
@@ -335,6 +345,7 @@ class MainWindow(QMainWindow):
             self.search_view,
             self.tags_view,
             self.sticky_view,
+            self.article_view,
             self.stats_view,
             self.heatmap_view,
         ):
@@ -432,7 +443,14 @@ class MainWindow(QMainWindow):
         self.sticky_view.update_requested.connect(self.on_sticky_update)
         self.sticky_view.delete_requested.connect(self.on_sticky_delete)
         self.sticky_view.filter_clear_requested.connect(self.on_sticky_filter_cleared)
-        self.sticky_view.maximize_requested.connect(self._open_sticky_max_window)  # V1.0.1
+
+        # 文章模块（2026-09-10）
+        self.article_view.add_requested.connect(self.on_article_add)
+        self.article_view.update_requested.connect(self.on_article_update)
+        self.article_view.delete_requested.connect(self.on_article_delete)
+        self.article_view.search_requested.connect(self.on_article_search)
+        self.article_view.tag_add_requested.connect(self.on_article_tag_add)
+        self.article_view.tag_remove_requested.connect(self.on_article_tag_remove)
 
         # F18 热力图年份切换
         self.heatmap_view.year_changed.connect(self._render_heatmap)
@@ -448,6 +466,7 @@ class MainWindow(QMainWindow):
             ("Ctrl+5", lambda: self.switch_period("year")),
             ("Ctrl+6", lambda: self.switch_view("calendar")),
             ("Ctrl+7", lambda: self.switch_view("heatmap")),
+            ("Ctrl+8", lambda: self.switch_view("article")),
             ("Ctrl+F", self.focus_search),
             ("Ctrl+,", self.open_settings),
             ("Ctrl+Q", self.request_quit),
@@ -532,6 +551,8 @@ class MainWindow(QMainWindow):
             self._render_tags()
         elif name == "sticky":
             self._render_sticky()
+        elif name == "article":
+            self._render_article()
         elif name == "stats":
             self._render_stats()
         elif name == "heatmap":
@@ -577,13 +598,10 @@ class MainWindow(QMainWindow):
         )
 
     def _render_sticky(self) -> None:
-        """F19.1：便签列表。与任务完全隔离；有搜索词时仅显示匹配便签。
-        V1.0.1：同时把同一份数据渲染到「最大化」独立窗口（若已打开），保证两边同步。"""
+        """F19.1：便签列表。与任务完全隔离；有搜索词时仅显示匹配便签。"""
         keyword = self.sticky_filter_keyword
         notes = self.db.search_stickies(keyword) if keyword else self.db.get_stickies()
         self.sticky_view.render(notes, keyword=keyword or None)
-        if self._sticky_max_window is not None:
-            self._sticky_max_window.render(notes, keyword=keyword or None)
 
     def _render_stats(self) -> None:
         """F23.5：计时统计（把 task_id 排行映射为任务标题）。"""
@@ -681,6 +699,7 @@ class MainWindow(QMainWindow):
         self.tags_btn.setChecked(name == "tags")
         self.heatmap_btn.setChecked(name == "heatmap")
         self.sticky_btn.setChecked(name == "sticky")
+        self.article_btn.setChecked(name == "article")
         self.stats_btn.setChecked(name == "stats")
         # 视图内容按需渲染：切过去时才渲染该页
         self.refresh_views()
@@ -877,6 +896,8 @@ class MainWindow(QMainWindow):
                     self._close_sticky_floater(note.id)
             elif field == "locked":  # V1.0.1
                 note.locked = bool(value)
+            elif field == "top":  # 文章模块：列表置顶
+                note.top = bool(value)
             self.db.save_sticky(note)
             break
         self.refresh_views()
@@ -885,6 +906,76 @@ class MainWindow(QMainWindow):
         self._close_sticky_floater(note_id)
         self.db.delete_sticky(note_id)
         self.refresh_views()
+
+    # ================================================================ 文章模块（2026-09-10）
+
+    def _render_article(self) -> None:
+        """渲染文章列表页；搜索态按关键词过滤，并带上当前文章的标签。"""
+        keyword = self.article_filter_keyword
+        articles = self.db.search_articles(keyword) if keyword else self.db.get_articles()
+        active_id = getattr(self.article_view, "_selected_id", None)
+        self.article_view.render(
+            articles,
+            keyword=keyword or None,
+            all_tags=self.db.get_tags(),
+            active_tag_ids=self.db.get_article_tag_ids(active_id) if active_id else [],
+        )
+
+    def on_article_add(self, title: str) -> None:
+        article = Article(title=title or "无标题文章")
+        self.db.save_article(article)
+        # 新建后自动选中并强制刷新右侧
+        self.article_view._selected_id = article.id
+        self.article_view._rendered_selected_id = None
+        self.refresh_views()
+
+    def on_article_update(self, article_id: str, field: str, value) -> None:
+        article = self.db.get_article(article_id)
+        if article is None:
+            return
+        if field == "title":
+            article.title = value
+        elif field == "content":
+            article.content = value
+        elif field == "tags":
+            self.db.set_article_tags(article_id, list(value))
+            self._render_article()
+            return
+        self.db.save_article(article)
+        self.refresh_views()
+
+    def on_article_delete(self, article_id: str) -> None:
+        reply = QMessageBox.question(
+            self, "删除文章", "确认删除这篇文章吗？删除后无法恢复。",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        self.db.delete_article(article_id)
+        if getattr(self.article_view, "_selected_id", None) == article_id:
+            self.article_view._selected_id = None
+            self.article_view._rendered_selected_id = None
+        self.refresh_views()
+
+    def on_article_search(self, keyword: str) -> None:
+        self.article_filter_keyword = keyword
+        self._render_article()
+
+    def on_article_tag_add(self, article_id: str, name: str) -> None:
+        tag = self.db.create_tag(name)
+        if tag is None:
+            tag = self.db.find_tag_by_name(name)
+        if tag is None:
+            return
+        current = self.db.get_article_tag_ids(article_id)
+        if tag.id not in current:
+            self.db.set_article_tags(article_id, current + [tag.id])
+        self._render_article()
+
+    def on_article_tag_remove(self, article_id: str, tag_id: str) -> None:
+        current = self.db.get_article_tag_ids(article_id)
+        self.db.set_article_tags(article_id, [t for t in current if t != tag_id])
+        self._render_article()
 
     def _open_sticky_floater(self, note: StickyNote) -> None:
         """F19.3：打开（或复用）常驻浮层。
@@ -919,44 +1010,6 @@ class MainWindow(QMainWindow):
         if floater is not None:
             floater.close()
             floater.deleteLater()
-
-    def _open_sticky_max_window(self) -> None:
-        """V1.0.1：打开便签「最大化」独立顶级窗口。复用主窗口的渲染数据。"""
-        if self._sticky_max_window is not None:
-            self._sticky_max_window.show()
-            self._sticky_max_window.raise_()
-            self._sticky_max_window.activateWindow()
-            return
-        win = StickyMaximizeWindow(self)
-        win.closed.connect(self._on_sticky_max_window_closed)
-        # 复用主窗口的信号，便签在两处都能编辑
-        win.sticky_view.add_requested.connect(self.on_sticky_add)
-        win.sticky_view.update_requested.connect(self.on_sticky_update)
-        win.sticky_view.delete_requested.connect(self.on_sticky_delete)
-        win.sticky_view.filter_clear_requested.connect(self.on_sticky_filter_cleared)
-        self._sticky_max_window = win
-        self._render_sticky_max_window()
-        win.show()
-
-    def _on_sticky_max_window_closed(self) -> None:
-        """最大化窗口关闭时清空引用，避免重复弹出已销毁对象。"""
-        self._sticky_max_window = None
-
-    def _render_sticky_max_window(self) -> None:
-        """把当前便签数据渲染到最大化窗口（与主视图同源）。"""
-        if self._sticky_max_window is None:
-            return
-        notes = self._filtered_stickies()
-        self._sticky_max_window.render(notes, keyword=self.sticky_filter_keyword or None)
-
-    def _filtered_stickies(self) -> list[StickyNote]:
-        """V1.0.1：与主便签视图同口径——根据 sticky_filter_keyword 过滤。
-        与 sticky_view.render 内使用的逻辑保持一致，避免两个窗口数据不同步。"""
-        notes = self.db.get_stickies()
-        kw = (self.sticky_filter_keyword or "").strip().lower()
-        if not kw:
-            return notes
-        return [n for n in notes if kw in n.content.lower()]
 
     def restore_pinned_stickies(self) -> None:
         """启动时按 pinned 恢复常驻浮层（PRD F19.5）。
@@ -1091,6 +1144,13 @@ class MainWindow(QMainWindow):
             task.completed_at = None
             self.db.log_event("task_uncomplete", quadrant=task.quadrant(self.today, self.thresholds).value)
         else:
+            # 子任务约束（2026-09-10）：存在未完成子任务时禁止完成主任务
+            if self.db.get_incomplete_subtask_count(task.id) > 0:
+                QMessageBox.warning(
+                    self, "无法完成",
+                    "请先完成该任务下的全部子任务，再标记主任务完成。",
+                )
+                return
             task.status = STATUS_DONE
             task.completed_at = datetime.now()
             self.db.log_event(
@@ -1431,6 +1491,12 @@ class MainWindow(QMainWindow):
             },
             "tasks": [task.to_export() for task in self.db.all_tasks()],
             "stickies": [note.to_export() for note in self.db.get_stickies()],
+            "articles": [a.to_export() for a in self.db.get_articles()],
+            "articleTags": [
+                {"articleId": a.id, "tagId": tid}
+                for a in self.db.get_articles()
+                for tid in self.db.get_article_tag_ids(a.id)
+            ],
         }
         try:
             with open(path, "w", encoding="utf-8") as handle:
@@ -1475,6 +1541,17 @@ class MainWindow(QMainWindow):
             self.db.save_task(Task.from_export(item))
         for item in payload.get("stickies", []):
             self.db.save_sticky(StickyNote.from_export(item))
+        # 文章模块（2026-09-10）
+        for item in payload.get("articles", []):
+            self.db.save_article(Article.from_export(item))
+        article_tags: dict = {}
+        for pair in payload.get("articleTags", []):
+            aid = pair.get("articleId")
+            tid = pair.get("tagId")
+            if aid and tid:
+                article_tags.setdefault(aid, []).append(tid)
+        for aid, tids in article_tags.items():
+            self.db.set_article_tags(aid, tids)
         settings = payload.get("settings") or {}
         if "urgency_threshold_important" in settings:
             self.thresholds = Thresholds(

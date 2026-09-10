@@ -1,0 +1,411 @@
+"""文章模块（2026-09-10）。
+
+ArticleView：左侧搜索栏 + 文章标题列表，右侧标题 / 正文编辑 + 实时字数 + 标签。
+- 纯文本编辑（支持 Markdown 语法但不渲染）
+- 正文上限 100KB；右下角实时字数「X 字 / 100KB」
+- 搜索命中关键词在标题与预览片段中高亮
+- 与任务 / 便签相互独立，复用 tag 表（article_tag 关联）但不与任务关联
+- 标题 / 正文自动保存：改动后 600ms 无输入自动落库；同时提供「保存」按钮和 Ctrl+S 快捷键
+"""
+
+from __future__ import annotations
+
+from PySide6.QtCore import QTimer, Qt, Signal
+from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtWidgets import (
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QPlainTextEdit,
+    QPushButton,
+    QSplitter,
+    QVBoxLayout,
+    QWidget,
+)
+
+from ..models import Article, Tag
+from .common import clear_layout
+
+#: 正文上限 100KB（按 UTF-8 字节计；中文约 3 字节/字，约 3.4 万字）
+MAX_ARTICLE_BYTES = 100 * 1024
+
+
+def _escape(text: str) -> str:
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _highlight(text: str, keyword: str) -> str:
+    """转义后高亮关键词（大小写不敏感，非正则替换）。"""
+    escaped = _escape(text)
+    if not keyword:
+        return escaped
+    return escaped.replace(_escape(keyword), f"<b>{_escape(keyword)}</b>")
+
+
+class ArticleView(QWidget):
+    """文章列表 / 编辑页。"""
+
+    add_requested = Signal(str)             # 新建文章（默认标题）
+    update_requested = Signal(str, str, object)  # (id, field, value) field∈{title, content}
+    delete_requested = Signal(str)
+    search_requested = Signal(str)          # 搜索关键词（空字符串=清除筛选）
+    tag_add_requested = Signal(str, str)    # (article_id, 标签名) 新建或复用
+    tag_remove_requested = Signal(str, str) # (article_id, tag_id)
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self._articles: list[Article] = []
+        self._keyword: str = ""
+        self._selected_id: str | None = None
+        self._rendered_selected_id: str | None = None
+        self._all_tags: list[Tag] = []
+        self._active_tag_ids: list[str] = []
+        self._loading: bool = False
+        self._over_limit: bool = False
+        self._pending_title: str | None = None
+        self._pending_content: str | None = None
+        self._build_ui()
+
+    # ------------------------------------------------------------ UI
+
+    def _build_ui(self) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(12, 12, 12, 12)
+        root.setSpacing(10)
+
+        bar = QHBoxLayout()
+        self.title_label = QLabel("文章")
+        self.title_label.setProperty("role", "view-title")
+        bar.addWidget(self.title_label, 1)
+        root.addLayout(bar)
+
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("搜索文章标题或正文…")
+        self.search_edit.textChanged.connect(self._on_search)
+        root.addWidget(self.search_edit)
+
+        splitter = QSplitter(Qt.Horizontal)
+
+        # 左：列表
+        left = QWidget()
+        left_layout = QVBoxLayout(left)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(6)
+        self.list_widget = QListWidget()
+        self.list_widget.setAlternatingRowColors(True)
+        self.list_widget.currentItemChanged.connect(self._on_item_selected)
+        left_layout.addWidget(self.list_widget)
+        splitter.addWidget(left)
+
+        # 右：编辑
+        right = QWidget()
+        right_layout = QVBoxLayout(right)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(8)
+
+        self.title_edit = QLineEdit()
+        self.title_edit.setPlaceholderText("文章标题")
+        self.title_edit.textChanged.connect(self._on_title_changed)
+        right_layout.addWidget(self._row("标题", self.title_edit))
+
+        self.content_edit = QPlainTextEdit()
+        self.content_edit.setPlaceholderText("正文（支持 Markdown 语法，不渲染）")
+        self.content_edit.setMinimumHeight(240)
+        self.content_edit.textChanged.connect(self._on_content_changed)
+        right_layout.addWidget(self.content_edit, 1)
+
+        self.word_label = QLabel()
+        self.word_label.setProperty("role", "meta")
+        right_layout.addWidget(self.word_label)
+
+        status_bar = QHBoxLayout()
+        self.status_label = QLabel("未选择文章")
+        self.status_label.setProperty("role", "meta")
+        status_bar.addWidget(self.status_label)
+        status_bar.addStretch(1)
+        right_layout.addLayout(status_bar)
+
+        right_layout.addWidget(self._build_tags_ui())
+
+        # 操作按钮行：新建 / 保存 / 删除 放在同一行
+        btn_bar = QHBoxLayout()
+        self.new_btn = QPushButton("新建文章")
+        self.new_btn.setToolTip("新建一篇文章")
+        self.new_btn.clicked.connect(lambda: self.add_requested.emit("无标题文章"))
+        btn_bar.addWidget(self.new_btn)
+        btn_bar.addStretch(1)
+        self.save_btn = QPushButton("保存")
+        self.save_btn.setToolTip("立即保存（Ctrl+S）")
+        self.save_btn.clicked.connect(self._force_save)
+        btn_bar.addWidget(self.save_btn)
+        self.delete_btn = QPushButton("删除文章")
+        self.delete_btn.setProperty("danger", True)
+        self.delete_btn.clicked.connect(self._on_delete)
+        btn_bar.addWidget(self.delete_btn)
+        right_layout.addLayout(btn_bar)
+
+        splitter.addWidget(right)
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 2)
+        root.addWidget(splitter, 1)
+
+        # 防抖提交（避免逐字触发整页刷新导致焦点/光标跳动）
+        self._title_timer = QTimer(self)
+        self._title_timer.setSingleShot(True)
+        self._title_timer.timeout.connect(self._commit_title)
+        self._content_timer = QTimer(self)
+        self._content_timer.setSingleShot(True)
+        self._content_timer.timeout.connect(self._commit_content)
+
+        # Ctrl+S 立即保存（也作为保存按钮的显式入口）
+        self._save_shortcut = QShortcut(QKeySequence("Ctrl+S"), self)
+        self._save_shortcut.activated.connect(self._force_save)
+
+    def _row(self, label: str, widget: QWidget) -> QWidget:
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(3)
+        cap = QLabel(label)
+        cap.setProperty("role", "field-label")
+        layout.addWidget(cap)
+        layout.addWidget(widget)
+        return container
+
+    def _build_tags_ui(self) -> QWidget:
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+        cap = QLabel("标签")
+        cap.setProperty("role", "field-label")
+        layout.addWidget(cap)
+        self.tag_chip_row = QHBoxLayout()
+        self.tag_chip_widget = QWidget()
+        self.tag_chip_widget.setLayout(self.tag_chip_row)
+        self.tag_chip_row.setContentsMargins(0, 0, 0, 0)
+        self.tag_chip_row.setSpacing(4)
+        layout.addWidget(self.tag_chip_widget)
+        self.tag_input = QLineEdit()
+        self.tag_input.setPlaceholderText("输入标签名后回车添加")
+        self.tag_input.returnPressed.connect(self._on_tag_committed)
+        layout.addWidget(self.tag_input)
+        return container
+
+    # ------------------------------------------------------------ 渲染
+
+    def render(self, articles, keyword: str | None = None,
+               all_tags: list[Tag] | None = None,
+               active_tag_ids: list[str] | None = None) -> None:
+        self._articles = list(articles)
+        self._keyword = keyword or ""
+        if all_tags is not None:
+            self._all_tags = list(all_tags)
+        if active_tag_ids is not None:
+            self._active_tag_ids = list(active_tag_ids)
+
+        self.title_label.setText(
+            f"文章 · 「{self._keyword}」匹配 {len(articles)} 篇" if self._keyword
+            else "文章"
+        )
+
+        # 重建左侧列表（blockSignals 避免重建时误触发选中）
+        self.list_widget.blockSignals(True)
+        self.list_widget.clear()
+        for art in self._articles:
+            item = QListWidgetItem()
+            widget = self._build_list_item(art)
+            self.list_widget.addItem(item)
+            self.list_widget.setItemWidget(item, widget)
+            item.setSizeHint(widget.sizeHint())
+            if art.id == self._selected_id:
+                item.setSelected(True)
+                self.list_widget.setCurrentItem(item)
+        self.list_widget.blockSignals(False)
+
+        # 右侧：仅当选中文章变化或首次时重填，避免编辑中刷新打断光标
+        sel = next((a for a in self._articles if a.id == self._selected_id), None)
+        if sel is not None:
+            if self._selected_id != self._rendered_selected_id:
+                self._show_article(sel)
+                self._rendered_selected_id = self._selected_id
+            else:
+                # 同一篇文章：刷新标签，并在没有待提交改动时显示已保存
+                self._render_tags()
+                if not (self._title_timer.isActive() or self._content_timer.isActive()):
+                    self._set_status("已保存", "meta")
+        else:
+            self._clear_right()
+            self._rendered_selected_id = None
+
+    def _build_list_item(self, article: Article) -> QWidget:
+        frame = QFrame()
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setSpacing(2)
+
+        title = QLabel()
+        title.setProperty("role", "article-title")
+        title.setText(f"<b>{_highlight(article.title or '无标题文章', self._keyword)}</b>")
+        title.setWordWrap(True)
+        layout.addWidget(title)
+
+        preview_text = (article.content or "").replace("\n", " ").strip()
+        if len(preview_text) > 60:
+            preview_text = preview_text[:60] + "…"
+        preview = QLabel()
+        preview.setProperty("role", "meta")
+        preview.setText(_highlight(preview_text, self._keyword))
+        preview.setWordWrap(True)
+        layout.addWidget(preview)
+        return frame
+
+    def _show_article(self, article: Article) -> None:
+        self._loading = True
+        self.title_edit.setReadOnly(False)
+        self.title_edit.setPlaceholderText("文章标题")
+        self.content_edit.setReadOnly(False)
+        self.content_edit.setPlaceholderText("正文（支持 Markdown 语法，不渲染）")
+        self.title_edit.setText(article.title or "")
+        self.content_edit.setPlainText(article.content or "")
+        self._update_word_count(article.content or "")
+        self._render_tags()
+        self._loading = False
+
+    def _clear_right(self) -> None:
+        self._loading = True
+        self.title_edit.setReadOnly(True)
+        self.title_edit.setPlaceholderText("选择或新建一篇文章以开始编辑")
+        self.title_edit.clear()
+        self.content_edit.setReadOnly(True)
+        self.content_edit.setPlaceholderText("选择或新建一篇文章以开始编辑")
+        self.content_edit.clear()
+        self.word_label.clear()
+        self._set_status("未选择文章", "meta")
+        clear_layout(self.tag_chip_row)
+        self.tag_chip_row.addStretch(1)
+        self._loading = False
+
+    def _render_tags(self) -> None:
+        clear_layout(self.tag_chip_row)
+        active = set(self._active_tag_ids)
+        for tag in self._all_tags:
+            if tag.id not in active:
+                continue
+            chip = QPushButton(tag.name)
+            chip.setFlat(True)
+            chip.setProperty("tagcolor", tag.color)
+            chip.setToolTip("点击移除标签")
+            chip.clicked.connect(
+                lambda _c=False, tid=tag.id: self.tag_remove_requested.emit(self._selected_id, tid)
+            )
+            self.tag_chip_row.addWidget(chip)
+        self.tag_chip_row.addStretch(1)
+
+    # ------------------------------------------------------------ 交互
+
+    def _on_item_selected(self, current, _previous) -> None:
+        if current is None:
+            return
+        row = self.list_widget.row(current)
+        if row < 0 or row >= len(self._articles):
+            return
+        article = self._articles[row]
+        self._selected_id = article.id
+        self._show_article(article)
+        self._rendered_selected_id = article.id
+
+    def _on_search(self, text: str) -> None:
+        self.search_requested.emit(text.strip())
+
+    def _on_title_changed(self) -> None:
+        if self._loading or not self._selected_id:
+            return
+        self._set_status("未保存（Ctrl+S 或自动保存）", "meta")
+        self._pending_title = self.title_edit.text()
+        self._title_timer.stop()
+        self._title_timer.start(600)
+
+    def _commit_title(self) -> None:
+        if self._loading or not self._selected_id or self._pending_title is None:
+            return
+        title = self._pending_title.strip() or "无标题文章"
+        self._pending_title = None
+        self._set_status("保存中…", "meta")
+        self.update_requested.emit(self._selected_id, "title", title)
+
+    def _on_content_changed(self) -> None:
+        if self._loading or not self._selected_id:
+            return
+        text = self.content_edit.toPlainText()
+        if len(text.encode("utf-8")) > MAX_ARTICLE_BYTES:
+            self._over_limit = True
+            self.word_label.setProperty("role", "error")
+            self.word_label.setText(f"{len(text)} 字 / 100KB —— 已达上限，请删减")
+            self.style().unpolish(self.word_label)
+            self.style().polish(self.word_label)
+            self._set_status("内容超过上限，无法保存", "error")
+            return
+        self._over_limit = False
+        self._update_word_count(text)
+        self._set_status("未保存（Ctrl+S 或自动保存）", "meta")
+        self._pending_content = text
+        self._content_timer.stop()
+        self._content_timer.start(600)
+
+    def _commit_content(self) -> None:
+        if self._loading or not self._selected_id or self._pending_content is None:
+            return
+        self._pending_content = None
+        if self._over_limit:
+            return
+        self._set_status("保存中…", "meta")
+        self.update_requested.emit(
+            self._selected_id, "content", self.content_edit.toPlainText()
+        )
+
+    def _update_word_count(self, text: str) -> None:
+        if self._over_limit:
+            return
+        self.word_label.setProperty("role", "meta")
+        self.word_label.setText(f"{len(text)} 字 / 100KB")
+        self.style().unpolish(self.word_label)
+        self.style().polish(self.word_label)
+
+    def _on_tag_committed(self) -> None:
+        if not self._selected_id:
+            return
+        name = self.tag_input.text().strip()
+        if not name:
+            return
+        self.tag_input.clear()
+        self.tag_add_requested.emit(self._selected_id, name)
+
+    def _on_delete(self) -> None:
+        if not self._selected_id:
+            return
+        self.delete_requested.emit(self._selected_id)
+
+    def _set_status(self, text: str, role: str = "meta") -> None:
+        self.status_label.setProperty("role", role)
+        self.status_label.setText(text)
+        self.style().unpolish(self.status_label)
+        self.style().polish(self.status_label)
+
+    def _force_save(self) -> None:
+        if not self._selected_id or self._loading or self._over_limit:
+            if self._over_limit:
+                self._set_status("内容超过上限，无法保存", "error")
+            return
+        self._title_timer.stop()
+        self._content_timer.stop()
+        title = self.title_edit.text().strip() or "无标题文章"
+        content = self.content_edit.toPlainText()
+        self._pending_title = None
+        self._pending_content = None
+        self._set_status("保存中…", "meta")
+        self.update_requested.emit(self._selected_id, "title", title)
+        self.update_requested.emit(self._selected_id, "content", content)

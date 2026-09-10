@@ -15,7 +15,12 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from quadrant_todo.db import Database
 from quadrant_todo.models import StickyNote, Task
 from quadrant_todo.views.board import QuadrantPanel
-from quadrant_todo.views.sticky import StickyMaximizeWindow, StickyView
+from quadrant_todo.views.sticky import (
+    StickyView,
+    _ContentEdit,
+    _STICKY_CONTENT_HEIGHT,
+    _STICKY_CONTENT_MAX_HEIGHT,
+)
 
 
 _app: QApplication | None = None
@@ -121,61 +126,61 @@ class StickyViewLockTest(unittest.TestCase):
         self.assertFalse(del_btn.isVisibleTo(row), "锁定时删除按钮应隐藏")
 
 
-# ============================================================== 最大化窗口
+# ============================================================== 单条便签 最大化/还原
 
-class StickyMaximizeWindowTest(unittest.TestCase):
-    """StickyMaximizeWindow：构造、渲染、与主窗口同源（共用 add/update/delete 信号）。"""
+class StickyMaximizeOneNoteTest(unittest.TestCase):
+    """V1.0.1 修正：最大化作用于单条便签内容区，而非打开独立的「便签模块」窗口。"""
 
     def setUp(self):
         _get_app()
-        self.win = StickyMaximizeWindow()
-        # 记录主窗口的信号已被连接（这里只测渲染/close，不实际测信号接线）
-        self.notes = [
-            StickyNote(content="A"),
-            StickyNote(content="B", locked=True),
-        ]
+        self.view = StickyView()
 
-    def tearDown(self):
-        self.win.close()
-        self.win.deleteLater()
+    def _row(self, note):
+        self.view.render([note])
+        return self.view.list_area.itemAt(0).widget()
 
-    def test_window_title_and_no_maximize_button(self):
-        self.assertIn("最大化", self.win.windowTitle())
-        # 内部 sticky_view 的「最大化」按钮应隐藏（自己已经是最大化了）
-        self.assertFalse(self.win.sticky_view.maximize_btn.isVisible())
-
-    def test_render_shows_all_notes(self):
-        self.win.render(self.notes, keyword=None)
-        # 列表 = 2 个便签行 + 1 个 stretch；统计真正的 widget 行数
-        widget_rows = 0
-        for i in range(self.win.sticky_view.list_area.count()):
-            if self.win.sticky_view.list_area.itemAt(i).widget() is not None:
-                widget_rows += 1
-        self.assertEqual(widget_rows, 2)
-
-    def test_restore_button_closes_window(self):
-        # 模拟「还原」按钮：找到该按钮并点击
+    def _btn(self, row, text):
         from PySide6.QtWidgets import QPushButton
-        restore_btn = next(b for b in self.win.findChildren(QPushButton) if b.text() == "还原")
-        restore_btn.click()
-        # closeEvent 触发后窗口应被隐藏（默认 Qt.Window 关闭即隐藏）
-        self.assertFalse(self.win.isVisible())
+        return next(b for b in row.findChildren(QPushButton) if b.text() == text)
 
-    def test_locked_note_hides_delete_in_max_window(self):
-        """最大化窗口与主窗口共用 _build_row 逻辑，锁定应同样隐藏删除按钮。"""
-        self.win.render(self.notes, keyword=None)
-        from PySide6.QtWidgets import QPushButton
-        # 列表项可能含 QSpacerItem（stretch），其 .widget() 为 None
-        rows = []
-        for i in range(self.win.sticky_view.list_area.count()):
-            it = self.win.sticky_view.list_area.itemAt(i)
-            w = it.widget() if it is not None else None
-            if w is not None:
-                rows.append(w)
-        del_rows_with = [r for r in rows if any(b.text() == "删除" and b.isVisibleTo(r) for b in r.findChildren(QPushButton))]
-        del_rows_hidden = [r for r in rows if any(b.text() == "删除" and not b.isVisibleTo(r) for b in r.findChildren(QPushButton))]
-        self.assertEqual(len(del_rows_with), 1, "只有未锁定的便签显示删除按钮")
-        self.assertEqual(len(del_rows_hidden), 1, "锁定的便签删除按钮被隐藏")
+    def test_maximize_button_present_per_note(self):
+        row = self._row(StickyNote(content="x"))
+        self.assertIsNotNone(self._btn(row, "最大化"))
+
+    def test_maximize_expands_content_height(self):
+        row = self._row(StickyNote(content="x"))
+        edit = row.findChild(_ContentEdit)
+        self.assertEqual(edit.height(), _STICKY_CONTENT_HEIGHT)
+        self._btn(row, "最大化").click()
+        self.assertEqual(edit.height(), _STICKY_CONTENT_MAX_HEIGHT)
+        self.assertEqual(self._btn(row, "还原").text(), "还原")
+
+    def test_restore_shrinks_content_height(self):
+        row = self._row(StickyNote(content="x"))
+        edit = row.findChild(_ContentEdit)
+        self._btn(row, "最大化").click()
+        self.assertEqual(edit.height(), _STICKY_CONTENT_MAX_HEIGHT)
+        self._btn(row, "还原").click()
+        self.assertEqual(edit.height(), _STICKY_CONTENT_HEIGHT)
+        self.assertEqual(self._btn(row, "最大化").text(), "最大化")
+
+    def test_maximized_state_persists_across_render(self):
+        note = StickyNote(content="x")
+        row = self._row(note)
+        self._btn(row, "最大化").click()
+        # 重新渲染（如编辑提交触发 refresh）后，该便签仍为最大化
+        self.view.render([note])
+        new_row = self.view.list_area.itemAt(0).widget()
+        self.assertEqual(new_row.findChild(_ContentEdit).height(), _STICKY_CONTENT_MAX_HEIGHT)
+
+    def test_deleted_note_pruned_from_maximized(self):
+        note = StickyNote(content="x")
+        self.view.render([note])
+        self._btn(self.view.list_area.itemAt(0).widget(), "最大化").click()
+        self.assertIn(note.id, self.view._maximized)
+        # 重新渲染时该便签已不存在 → 从集合剔除
+        self.view.render([])
+        self.assertNotIn(note.id, self.view._maximized)
 
 
 # ============================================================== 四象限「共 N 条」

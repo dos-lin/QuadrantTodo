@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from PySide6.QtCore import QEvent, Qt, Signal
+from PySide6.QtCore import QEvent, QTimer, Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QColorDialog,
@@ -27,6 +27,8 @@ from PySide6.QtWidgets import (
 
 # 每个便签内容区的固定高度（超出滚动），让长便签不撑爆页面、整页用 QScrollArea 滑动浏览
 _STICKY_CONTENT_HEIGHT = 180
+# V1.0.1 修正：单条便签点「最大化」时内容区放大的高度，点「还原」回到 _STICKY_CONTENT_HEIGHT
+_STICKY_CONTENT_MAX_HEIGHT = 600
 _STICKY_PREVIEW_CHARS = 24
 
 from ..models import StickyNote
@@ -42,12 +44,12 @@ class StickyView(QWidget):
     update_requested = Signal(str, str, object)  # (id, field, value)
     delete_requested = Signal(str)
     filter_clear_requested = Signal()  # 清除搜索词过滤
-    maximize_requested = Signal()     # V1.0.1：点击头部「最大化」按钮
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self._notes: list[StickyNote] = []
         self._keyword: str = ""
+        self._maximized: set[str] = set()  # V1.0.1 修正：被「最大化」放大的单条便签 id 集合
 
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 14, 16, 14)
@@ -62,12 +64,6 @@ class StickyView(QWidget):
         self.clear_filter_btn.setVisible(False)
         self.clear_filter_btn.clicked.connect(self.filter_clear_requested.emit)
         bar.addWidget(self.clear_filter_btn)
-        # V1.0.1：最大化按钮（独立顶级窗口查看全部便签）
-        self.maximize_btn = QPushButton("最大化")
-        self.maximize_btn.setFlat(True)
-        self.maximize_btn.setToolTip("在新窗口中查看全部便签")
-        self.maximize_btn.clicked.connect(self.maximize_requested.emit)
-        bar.addWidget(self.maximize_btn)
         new_btn = QPushButton("新建便签")
         new_btn.clicked.connect(lambda: self._on_add())
         bar.addWidget(new_btn)
@@ -82,10 +78,10 @@ class StickyView(QWidget):
         self.list_area.setSpacing(8)
         container = QWidget()
         container.setLayout(self.list_area)
-        area = QScrollArea()
-        area.setWidgetResizable(True)
-        area.setWidget(container)
-        root.addWidget(area, 1)
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setWidget(container)
+        root.addWidget(self._scroll, 1)
 
     def _on_add(self) -> None:
         dlg = StickyAddDialog(self)
@@ -97,16 +93,27 @@ class StickyView(QWidget):
     def render(self, notes: list[StickyNote], keyword: str | None = None) -> None:
         self._notes = notes
         self._keyword = keyword or ""
+        # 放大状态只在当前存在的便签里保留（删除的便签自动剔除，避免集合无限增长）
+        self._maximized &= {n.id for n in notes}
         if self._keyword:
             self.title.setText(f"小便签 · 「{self._keyword}」匹配 {len(notes)} 条")
             self.clear_filter_btn.setVisible(True)
         else:
             self.title.setText("小便签")
             self.clear_filter_btn.setVisible(False)
+        # 重建前记下滚动位置，重建后恢复，避免点按钮（底色/常驻/锁定/删除）时
+        # 整个列表重绘导致滚动条跳到末尾（PRD 体验问题）。
+        scroll_bar = self._scroll.verticalScrollBar()
+        saved_pos = scroll_bar.value() if scroll_bar is not None else 0
+
         clear_layout(self.list_area)
         for note in notes:
             self.list_area.addWidget(self._build_row(note))
         self.list_area.addStretch(1)
+
+        if scroll_bar is not None:
+            # 用 singleShot(0) 等布局重算完、滚动范围更新后再恢复，避免被新范围截断
+            QTimer.singleShot(0, lambda: scroll_bar.setValue(saved_pos))
 
     def _build_row(self, note: StickyNote) -> QWidget:
         frame = QFrame()
@@ -120,9 +127,8 @@ class StickyView(QWidget):
         edit.setContextMenuPolicy(Qt.NoContextMenu)  # 禁用右键菜单
         edit.setFrameShape(QFrame.NoFrame)
         edit.setStyleSheet("background: transparent;")
-        # 固定每个便签的内容区高度，超出自动滚动；同时锁定整体便签卡片高度，
-        # 让多便签页用外层 QScrollArea 滚动浏览，避免单个长便签撑爆视野。
-        edit.setFixedHeight(_STICKY_CONTENT_HEIGHT)
+        # 内容区默认固定高度（超出滚动）；若该便签处于「最大化」状态则放大内容区。
+        edit.setFixedHeight(_STICKY_CONTENT_MAX_HEIGHT if note.id in self._maximized else _STICKY_CONTENT_HEIGHT)
         edit.committed.connect(
             lambda text, nid=note.id, old=note.content: (
                 self.update_requested.emit(nid, "content", text)
@@ -145,6 +151,15 @@ class StickyView(QWidget):
         pin_btn.clicked.connect(lambda _checked, nid=note.id: self.update_requested.emit(nid, "pinned", not note.pinned))
         row.addWidget(pin_btn)
 
+        # 文章模块：置顶按钮（列表内排序优先，排在普通便签之前）
+        top_btn = QPushButton("置顶" if not note.top else "已置顶")
+        top_btn.setFlat(True)
+        top_btn.setCheckable(True)
+        top_btn.setChecked(note.top)
+        top_btn.setToolTip("置顶后排在列表最前面" if not note.top else "已置顶")
+        top_btn.clicked.connect(lambda _checked, nid=note.id: self.update_requested.emit(nid, "top", not note.top))
+        row.addWidget(top_btn)
+
         # V1.0.1：锁定按钮。锁定后禁止删除（删除按钮自动隐藏，见下方）
         lock_btn = QPushButton("🔓 解锁" if note.locked else "🔒 锁定")
         lock_btn.setFlat(True)
@@ -153,6 +168,16 @@ class StickyView(QWidget):
         lock_btn.setToolTip("锁定后禁止删除该便签" if not note.locked else "已锁定，点击解除")
         lock_btn.clicked.connect(lambda _checked, nid=note.id: self.update_requested.emit(nid, "locked", not note.locked))
         row.addWidget(lock_btn)
+
+        # V1.0.1 修正：单条便签「最大化 / 还原」——就地放大本条内容区，而非打开独立「便签模块」窗口
+        is_max = note.id in self._maximized
+        max_btn = QPushButton("还原" if is_max else "最大化")
+        max_btn.setFlat(True)
+        max_btn.setToolTip("放大本条便签内容区" if not is_max else "还原本条便签内容区")
+        max_btn.clicked.connect(
+            lambda _=None, nid=note.id, ed=edit, btn=max_btn: self._toggle_maximize(nid, ed, btn)
+        )
+        row.addWidget(max_btn)
 
         # V1.0.1：删除按钮在锁定时隐藏（避免误删且表达「锁定即不可删」）
         self._del_btn_for_note: dict[str, QPushButton] = {}
@@ -174,6 +199,19 @@ class StickyView(QWidget):
         row.addStretch(1)
         layout.addLayout(row)
         return frame
+
+    def _toggle_maximize(self, note_id: str, edit: _ContentEdit, btn: QPushButton) -> None:
+        """单条便签内容区最大化 / 还原（就地切换，不重渲染整页，保留滚动位置与编辑焦点）。"""
+        if note_id in self._maximized:
+            self._maximized.discard(note_id)
+            edit.setFixedHeight(_STICKY_CONTENT_HEIGHT)
+            btn.setText("最大化")
+            btn.setToolTip("放大本条便签内容区")
+        else:
+            self._maximized.add(note_id)
+            edit.setFixedHeight(_STICKY_CONTENT_MAX_HEIGHT)
+            btn.setText("还原")
+            btn.setToolTip("还原本条便签内容区")
 
     def _on_color(self, note_id: str) -> None:
         color = QColorDialog.getColor(QColor("#FFF9C4"), self, "选择便签底色")
@@ -209,62 +247,6 @@ class _ContentEdit(QPlainTextEdit):
     def focusOutEvent(self, event) -> None:
         self.committed.emit(self.toPlainText().strip())
         super().focusOutEvent(event)
-
-
-class StickyMaximizeWindow(QWidget):
-    """V1.0.1：便签「最大化」独立顶级窗口。
-
-    与主窗口的 StickyView 共享信号（add/update/delete），
-    因此两边的便签始终同步。本窗口自带「还原」按钮，关闭自己回到主窗口的普通视图。
-    关闭（窗口右上 X）也视为还原。
-    """
-
-    closed = Signal()  # 窗口即将关闭（主窗口可借此清理追踪状态）
-
-    def __init__(self, parent: QWidget | None = None):
-        # 用 Tool + WindowStaysOnTopHint 让它浮在主窗口之上但不抢焦点
-        super().__init__(parent, Qt.Window)
-        self.setWindowTitle("便签 · 最大化")
-        self.resize(820, 600)
-        # 居中显示
-        screen = self.screen()
-        if screen is not None:
-            geo = screen.availableGeometry()
-            self.move(
-                geo.x() + (geo.width() - self.width()) // 2,
-                geo.y() + (geo.height() - self.height()) // 3,
-            )
-
-        root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
-
-        # 顶部工具条：仅还原按钮（最大化窗口没有「最大化」按钮自己）
-        bar = QWidget()
-        bar.setProperty("role", "sticky-max-bar")
-        bar_layout = QHBoxLayout(bar)
-        bar_layout.setContentsMargins(12, 8, 12, 8)
-        bar_layout.setSpacing(8)
-        title = QLabel("便签 · 最大化")
-        title.setProperty("role", "view-title")
-        bar_layout.addWidget(title, 1)
-        restore_btn = QPushButton("还原")
-        restore_btn.clicked.connect(self.close)
-        bar_layout.addWidget(restore_btn)
-        root.addWidget(bar)
-
-        # 复用的便签内容面板（与主窗口共享信号）
-        self.sticky_view = StickyView(self)
-        # 最大化窗口本身不需要「最大化」按钮（已经最大化了），把头部那个按钮隐藏
-        self.sticky_view.maximize_btn.setVisible(False)
-        root.addWidget(self.sticky_view, 1)
-
-    def render(self, notes: list[StickyNote], keyword: str | None = None) -> None:
-        self.sticky_view.render(notes, keyword)
-
-    def closeEvent(self, event) -> None:
-        self.closed.emit()
-        super().closeEvent(event)
 
 
 class StickyAddDialog(QDialog):
