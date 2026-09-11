@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QDateTimeEdit,
     QCalendarWidget,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -274,40 +275,38 @@ class DetailPanel(QFrame):
 
         form.addStretch(1)
 
-        # 操作区
-        actions = QVBoxLayout()
+        # 操作区（两列网格，每行 2 个按钮）
+        actions = QGridLayout()
         actions.setSpacing(6)
         self.complete_btn = QPushButton("标记完成")
         self.complete_btn.clicked.connect(lambda: self._emit_id(self.action_complete))
-        actions.addWidget(self.complete_btn)
+        actions.addWidget(self.complete_btn, 0, 0)
 
         self.start_btn = QPushButton("开始")
         self.start_btn.clicked.connect(lambda: self._emit_id(self.action_start))
-        actions.addWidget(self.start_btn)
+        actions.addWidget(self.start_btn, 0, 1)
 
         self.today_btn = QPushButton("加入今日")
         self.today_btn.clicked.connect(lambda: self._emit_id(self.action_today))
-        actions.addWidget(self.today_btn)
+        actions.addWidget(self.today_btn, 1, 0)
 
         # 番茄钟（PRD F23.1）：不触碰任务状态机
         self.pomodoro_btn = QPushButton("开始番茄钟")
         self.pomodoro_btn.clicked.connect(lambda: self._emit_id(self.pomodoro_requested))
-        actions.addWidget(self.pomodoro_btn)
+        actions.addWidget(self.pomodoro_btn, 1, 1)
 
-        row = QHBoxLayout()
         self.abandon_btn = QPushButton("放弃")
         self.abandon_btn.clicked.connect(lambda: self._emit_id(self.action_abandon))
-        row.addWidget(self.abandon_btn)
+        actions.addWidget(self.abandon_btn, 2, 0)
 
         self.restore_btn = QPushButton("恢复任务")
         self.restore_btn.clicked.connect(lambda: self._emit_id(self.action_restore))
-        row.addWidget(self.restore_btn)
-        actions.addLayout(row)
+        actions.addWidget(self.restore_btn, 2, 1)
 
         self.delete_btn = QPushButton("删除")
         self.delete_btn.setProperty("danger", True)
         self.delete_btn.clicked.connect(lambda: self._emit_id(self.action_delete))
-        actions.addWidget(self.delete_btn)
+        actions.addWidget(self.delete_btn, 3, 0, 1, 2)  # 独占一行，跨两列
 
         form.addLayout(actions)
         self.scroll.setWidget(self.form)
@@ -651,7 +650,8 @@ class DetailPanel(QFrame):
         closed = task.status == "done"
         self.start_btn.setVisible(not closed and task.status == "todo")
         self.today_btn.setVisible(not task.is_closed)
-        self.today_btn.setText("移出今日" if task.today_flag else "加入今日")
+        # 2026-09-11：加入/移出今日以「截止日期是否为今天」为准
+        self.today_btn.setText("移出今日" if task.due_date == self._today else "加入今日")
         self.complete_btn.setText("取消完成" if closed else "标记完成")
         # 番茄钟对已完成任务无意义
         self.pomodoro_btn.setVisible(not task.is_closed)

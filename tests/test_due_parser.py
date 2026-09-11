@@ -48,10 +48,10 @@ def test_invalid_full_date_ignored() -> None:
 
 
 def test_month_day_defaults_to_current_year() -> None:
-    """未来日期：默认当年。"""
+    """未来日期：默认当年。标题保留用户输入的日期片段。"""
     result = parse_due_from_title("交报告 9月15日", TODAY)
     assert result.due_date == date(2026, 9, 15)
-    assert result.title == "交报告"
+    assert result.title == "交报告 9月15日"
 
 
 def test_month_day_past_rolls_to_next_year() -> None:
@@ -76,10 +76,10 @@ def test_month_day_numeric_separator(raw: str) -> None:
 
 
 def test_day_only_defaults_to_current_month() -> None:
-    """当月该天尚未过去 → 用当月。"""
+    """当月该天尚未过去 → 用当月。标题保留「31号」。"""
     result = parse_due_from_title("交房租 31号", TODAY)
     assert result.due_date == date(2026, 8, 31)
-    assert result.title == "交房租"
+    assert result.title == "交房租 31号"
 
 
 def test_day_only_past_rolls_to_next_month() -> None:
@@ -126,17 +126,19 @@ def test_relative_words(raw: str, expected: date) -> None:
     assert parse_due_from_title(raw, TODAY).due_date == expected
 
 
-# ---------------------------------------------------------------- 标题清理
+# ---------------------------------------------------------------- 标题保留
 
 
-def test_date_fragment_stripped_from_title() -> None:
+def test_date_fragment_kept_in_title() -> None:
+    """2026-09-11 起：识别为截止日期，但标题保留原文，不删除日期片段。"""
     result = parse_due_from_title("  9月15日 交季度报告  ", TODAY)
-    assert result.title == "交季度报告"
+    assert result.title == "9月15日 交季度报告"
     assert result.matched == "9月15日"
+    assert result.due_date == date(2026, 9, 15)
 
 
-def test_empty_after_strip_falls_back_to_raw() -> None:
-    """标题只剩日期时不能变空，回退保留原文。"""
+def test_title_only_date_kept_as_is() -> None:
+    """标题只剩日期时原文保留。"""
     result = parse_due_from_title("9月15日", TODAY)
     assert result.title == "9月15日"
     assert result.due_date == date(2026, 9, 15)

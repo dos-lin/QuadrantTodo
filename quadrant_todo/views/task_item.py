@@ -285,7 +285,8 @@ class TaskItemWidget(QFrame):
         self.primary_btn.setToolTip("标记完成" if doing else "切换为进行中")
         self.primary_btn.setVisible(task.status in ("todo", STATUS_DOING))
         self.today_btn.setVisible(not task.is_closed)
-        self.today_btn.setText("移出今日" if task.today_flag else "加入今日")
+        # 2026-09-11：以「截止日期是否为今天」判断加入/移出今日
+        self.today_btn.setText("移出今日" if task.due_date == self.today else "加入今日")
         self.delete_btn.setVisible(True)
 
         self.setProperty("selected", False)

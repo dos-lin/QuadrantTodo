@@ -127,5 +127,54 @@ class DetailTitleCommitTest(unittest.TestCase):
         )
 
 
+class ActionButtonsGridLayoutTest(unittest.TestCase):
+    """操作按钮两列网格布局（2026-09-11 用户截图反馈）。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
+    def setUp(self):
+        self.panel = DetailPanel()
+
+    def _action_grid(self):
+        from PySide6.QtWidgets import QGridLayout
+
+        def walk(layout):
+            if layout is None:
+                return
+            for i in range(layout.count()):
+                item = layout.itemAt(i)
+                child = item.layout()
+                if isinstance(child, QGridLayout):
+                    yield child
+                elif child is not None:
+                    yield from walk(child)
+
+        # 网格在 scroll 内容控件（complete_btn 的父控件）的布局里
+        grids = list(walk(self.panel.complete_btn.parentWidget().layout()))
+        self.assertTrue(grids, "操作区应为 QGridLayout")
+        return grids[0]
+
+    def test_buttons_in_two_column_grid(self):
+        grid = self._action_grid()
+        cases = {
+            "complete_btn": (0, 0), "start_btn": (0, 1),
+            "today_btn": (1, 0), "pomodoro_btn": (1, 1),
+            "abandon_btn": (2, 0), "restore_btn": (2, 1),
+        }
+        for attr, (row, col) in cases.items():
+            btn = getattr(self.panel, attr)
+            self.assertEqual(
+                grid.getItemPosition(grid.indexOf(btn)), (row, col, 1, 1),
+                f"{attr} 应位于第 {row} 行第 {col} 列",
+            )
+
+    def test_delete_button_spans_both_columns(self):
+        grid = self._action_grid()
+        pos = grid.getItemPosition(grid.indexOf(self.panel.delete_btn))
+        self.assertEqual(pos, (3, 0, 1, 2), "删除按钮应独占一行并跨两列")
+
+
 if __name__ == "__main__":
     unittest.main()

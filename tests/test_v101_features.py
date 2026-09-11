@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from datetime import date, timedelta
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
 # offscreen 必须在 QApplication 创建前设置（CI 兼容）
@@ -181,6 +182,40 @@ class StickyMaximizeOneNoteTest(unittest.TestCase):
         # 重新渲染时该便签已不存在 → 从集合剔除
         self.view.render([])
         self.assertNotIn(note.id, self.view._maximized)
+
+    # ---------------------------------------------------------- 滚动条策略（2026-09-11）
+
+    def test_default_hides_vertical_scrollbar(self):
+        """固定高度下不显示便签内纵向滚动条。"""
+        row = self._row(StickyNote(content="x"))
+        edit = row.findChild(_ContentEdit)
+        self.assertEqual(edit.verticalScrollBarPolicy(), Qt.ScrollBarAlwaysOff)
+
+    def test_maximize_shows_vertical_scrollbar(self):
+        """最大化后显示纵向滚动条，保证长内容能滚到底看全文。"""
+        row = self._row(StickyNote(content="x"))
+        edit = row.findChild(_ContentEdit)
+        self._btn(row, "最大化").click()
+        self.assertEqual(edit.verticalScrollBarPolicy(), Qt.ScrollBarAsNeeded)
+
+    def test_restore_hides_vertical_scrollbar_again(self):
+        row = self._row(StickyNote(content="x"))
+        edit = row.findChild(_ContentEdit)
+        self._btn(row, "最大化").click()
+        self._btn(row, "还原").click()
+        self.assertEqual(edit.verticalScrollBarPolicy(), Qt.ScrollBarAlwaysOff)
+
+    def test_maximized_state_keeps_scrollbar_after_render(self):
+        """最大化便签在重新渲染后仍是最大化且滚动条可见。"""
+        note = StickyNote(content="x")
+        row = self._row(note)
+        self._btn(row, "最大化").click()
+        self.view.render([note])
+        new_row = self.view.list_area.itemAt(0).widget()
+        self.assertEqual(
+            new_row.findChild(_ContentEdit).verticalScrollBarPolicy(),
+            Qt.ScrollBarAsNeeded,
+        )
 
 
 # ============================================================== 四象限「共 N 条」

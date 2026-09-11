@@ -123,12 +123,15 @@ class StickyView(QWidget):
         layout.setContentsMargins(10, 8, 10, 8)
         layout.setSpacing(6)
 
+        is_max = note.id in self._maximized
         edit = _ContentEdit(note.content)
         edit.setContextMenuPolicy(Qt.NoContextMenu)  # 禁用右键菜单
         edit.setFrameShape(QFrame.NoFrame)
         edit.setStyleSheet("background: transparent;")
-        # 内容区默认固定高度（超出滚动）；若该便签处于「最大化」状态则放大内容区。
-        edit.setFixedHeight(_STICKY_CONTENT_MAX_HEIGHT if note.id in self._maximized else _STICKY_CONTENT_HEIGHT)
+        # 内容区默认固定高度；若该便签处于「最大化」状态则放大内容区。
+        edit.setFixedHeight(_STICKY_CONTENT_MAX_HEIGHT if is_max else _STICKY_CONTENT_HEIGHT)
+        # 默认固定高度下不显示纵向滚动条；最大化后显示，保证长内容能滚到底看到全文。
+        self._apply_scroll_policy(edit, is_max)
         edit.committed.connect(
             lambda text, nid=note.id, old=note.content: (
                 self.update_requested.emit(nid, "content", text)
@@ -170,7 +173,6 @@ class StickyView(QWidget):
         row.addWidget(lock_btn)
 
         # V1.0.1 修正：单条便签「最大化 / 还原」——就地放大本条内容区，而非打开独立「便签模块」窗口
-        is_max = note.id in self._maximized
         max_btn = QPushButton("还原" if is_max else "最大化")
         max_btn.setFlat(True)
         max_btn.setToolTip("放大本条便签内容区" if not is_max else "还原本条便签内容区")
@@ -205,13 +207,22 @@ class StickyView(QWidget):
         if note_id in self._maximized:
             self._maximized.discard(note_id)
             edit.setFixedHeight(_STICKY_CONTENT_HEIGHT)
+            self._apply_scroll_policy(edit, False)
             btn.setText("最大化")
             btn.setToolTip("放大本条便签内容区")
         else:
             self._maximized.add(note_id)
             edit.setFixedHeight(_STICKY_CONTENT_MAX_HEIGHT)
+            self._apply_scroll_policy(edit, True)
             btn.setText("还原")
             btn.setToolTip("还原本条便签内容区")
+
+    @staticmethod
+    def _apply_scroll_policy(edit: "_ContentEdit", is_max: bool) -> None:
+        """固定高度时隐藏纵向滚动条；最大化后显示，保证长内容能滚到底看全文。"""
+        edit.setVerticalScrollBarPolicy(
+            Qt.ScrollBarAsNeeded if is_max else Qt.ScrollBarAlwaysOff
+        )
 
     def _on_color(self, note_id: str) -> None:
         color = QColorDialog.getColor(QColor("#FFF9C4"), self, "选择便签底色")

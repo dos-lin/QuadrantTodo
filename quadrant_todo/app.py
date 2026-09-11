@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -99,6 +100,22 @@ _STICKY_COLORS = ["#FFF9C4", "#FFE0B2", "#C8E6C9", "#BBDEFB", "#E1BEE7", "#F8BBD
 
 EXPORT_FORMAT = "quadrant-todo-export"
 EXPORT_VERSION = 1
+
+
+def _merge_for_import(obj, existing_by_id: dict):
+    """增量导入的落库策略（2026-09-11）。
+
+    - 本地不存在该 id            → 直接新增
+    - 同 id 且数据完全一致        → 覆盖（结果等价，无副作用）
+    - 同 id 但数据不同            → 换新 id 追加为新记录，本地原记录保留
+
+    这样「重复导入同一文件」是幂等的（不会产生副本），
+    而任何有差异的记录都不会覆盖掉本地已有数据。
+    """
+    old = existing_by_id.get(obj.id)
+    if old is not None and old.to_export() != obj.to_export():
+        obj.id = uuid.uuid4().hex
+    return obj
 
 
 class MainWindow(QMainWindow):
@@ -1181,12 +1198,23 @@ class MainWindow(QMainWindow):
         self.reload()
 
     def on_today_toggled(self, task_id: str) -> None:
-        """F4.6：加入/移出今日，不修改截止日期。"""
+        """加入/移出今日 —— 以截止日期表达（2026-09-11 调整）。
+
+        加入今日 → 截止日期设为今天；移出今日 → 截止日期清空。
+        today_flag 同步跟随，保证与历史数据（旧版靠 today_flag 标记）口径一致。
+        """
         task = self._find(task_id)
         if not task or task.is_closed:
             return
-        task.today_flag = not task.today_flag
-        self._save(task, "add_to_today", has_due_date=task.due_date is not None)
+        if task.due_date == self.today:          # 已是今天 → 移出
+            task.due_date = None
+            task.today_flag = False
+            event = "remove_from_today"
+        else:                                    # 加入今天
+            task.due_date = self.today
+            task.today_flag = True
+            event = "add_to_today"
+        self._save(task, event, has_due_date=task.due_date is not None)
         self.reload()
 
     def on_abandon(self, task_id: str) -> None:
@@ -1509,7 +1537,13 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "导出完成", f"已导出到\n{path}")
 
     def import_data(self) -> None:
-        """F10.4 / F10.6：导入 JSON，全量替换现有任务。"""
+        """F10.4 / F10.6：导入 JSON —— 增量合并（2026-09-11 起不再全量替换）。
+
+        不清空现有数据。逐条按 id 比对：
+        * 本地无此 id        → 新增
+        * 同 id 且完全一致   → 覆盖（等价无变化，重复导入同一文件幂等）
+        * 同 id 但数据不同   → 换新 id 追加，本地原记录保留
+        """
         path, _ = QFileDialog.getOpenFileName(self, "导入数据", "", "JSON 文件 (*.json)")
         if not path:
             return
@@ -1530,29 +1564,45 @@ class MainWindow(QMainWindow):
             return
 
         reply = QMessageBox.question(
-            self, "导入数据", "导入将覆盖现有全部任务，确定继续？",
+            self, "导入数据",
+            "将以「增量」方式导入，不会清空现有数据：\n"
+            "· 完全相同的记录 → 覆盖（重复导入不产生副本）\n"
+            "· 有差异的记录 → 作为新记录追加，原记录保留\n\n"
+            "确定继续？",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
         )
         if reply != QMessageBox.Yes:
             return
 
-        self.db.clear_tasks()
-        self.db.clear_stickies()
+        # ---- 任务（增量）
+        existing_tasks = {t.id: t for t in self.db.all_tasks()}
         for item in payload.get("tasks", []):
-            self.db.save_task(Task.from_export(item))
+            self.db.save_task(_merge_for_import(Task.from_export(item), existing_tasks))
+
+        # ---- 便签（增量）
+        existing_stickies = {n.id: n for n in self.db.get_stickies()}
         for item in payload.get("stickies", []):
-            self.db.save_sticky(StickyNote.from_export(item))
-        # 文章模块（2026-09-10）
+            self.db.save_sticky(_merge_for_import(StickyNote.from_export(item), existing_stickies))
+
+        # ---- 文章（增量）；若因内容不同而另存为新 id，其标签关联要跟着映射到新 id
+        existing_articles = {a.id: a for a in self.db.get_articles()}
+        article_id_map: dict[str, str] = {}
         for item in payload.get("articles", []):
-            self.db.save_article(Article.from_export(item))
-        article_tags: dict = {}
+            obj = Article.from_export(item)
+            old_id = obj.id
+            obj = _merge_for_import(obj, existing_articles)
+            article_id_map[old_id] = obj.id
+            self.db.save_article(obj)
+
+        # ---- 文章标签：与本地已有标签取并集，不做整体替换
+        merged_tags: dict[str, set[str]] = {}
         for pair in payload.get("articleTags", []):
             aid = pair.get("articleId")
             tid = pair.get("tagId")
             if aid and tid:
-                article_tags.setdefault(aid, []).append(tid)
-        for aid, tids in article_tags.items():
-            self.db.set_article_tags(aid, tids)
+                merged_tags.setdefault(article_id_map.get(aid, aid), set()).add(tid)
+        for aid, tids in merged_tags.items():
+            self.db.set_article_tags(aid, list(set(self.db.get_article_tag_ids(aid)) | tids))
         settings = payload.get("settings") or {}
         if "urgency_threshold_important" in settings:
             self.thresholds = Thresholds(
@@ -1569,7 +1619,13 @@ class MainWindow(QMainWindow):
         self.db.set_setting(config.KEY_THRESHOLD_UNIMPORTANT, self.thresholds.unimportant)
         self.db.log_event("data_import")
         self.reload()
-        QMessageBox.information(self, "导入完成", "数据已导入")
+        QMessageBox.information(
+            self, "导入完成",
+            "已按增量方式导入（原有数据保留）。\n"
+            f"当前共：任务 {len(self.db.all_tasks())} 条、"
+            f"便签 {len(self.db.get_stickies())} 条、"
+            f"文章 {len(self.db.get_articles())} 篇。",
+        )
 
     # ================================================================ 选中与快捷键
 

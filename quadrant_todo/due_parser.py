@@ -14,7 +14,8 @@
     * 顺延规则是为了避免「刚创建就已逾期」。用户写「3月5日」的意图几乎不可能是
       过去的 3 月 5 日，而是即将到来的那个 3 月 5 日。
     * 完整年月日不做顺延，因为年份是用户显式给出的，属于明确意图。
-    * 命中的日期片段会从标题中剥离，避免标题与详情面板重复显示同一个日期。
+    * 命中的日期片段**保留在标题中**（2026-09-11 调整）：用户输入的标题即所见，
+      日期仅被识别为截止日期，不从标题里删掉。
 """
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ __all__ = ["ParsedTitle", "parse_due_from_title"]
 class ParsedTitle:
     """标题解析结果。"""
 
-    #: 剥离日期片段后的标题；若剥离后为空则回退为原文
+    #: 标题（保留用户输入的原文，含日期片段；2026-09-11 起不再剥离）
     title: str
     #: 识别到的截止日期；未识别到为 None
     due_date: Optional[date]
@@ -77,9 +78,6 @@ _RELATIVE_DAYS = {
 
 #: 顺序即优先级：位置相同时取更靠前的模式
 _PATTERNS = (_FULL_DATE, _MONTH_DAY_CN, _MONTH_DAY_NUM, _DAY_ONLY, _RELATIVE)
-
-#: 剥离日期片段后，需要从标题两端清掉的残留符号
-_EDGE_CHARS = " \t\r\n-—–_~·,，。、;；:：/\\|"
 
 
 # ---------------------------------------------------------------- 内部工具
@@ -154,14 +152,6 @@ def _resolve(match, today: date) -> Optional[date]:
     return candidate
 
 
-def _clean_title(text: str, matched: str) -> str:
-    """剥离日期片段并规整空白与残留符号；剥离后为空则回退原文。"""
-    cleaned = text.replace(matched, "", 1)
-    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
-    cleaned = cleaned.strip(_EDGE_CHARS).strip()
-    return cleaned or text.strip()
-
-
 # ---------------------------------------------------------------- 对外入口
 
 
@@ -173,7 +163,7 @@ def parse_due_from_title(text: str, today: Optional[date] = None) -> ParsedTitle
         today: 计算基准日，缺省取系统当天（便于测试与跨日重算）。
 
     Returns:
-        ParsedTitle：剥离后的标题、识别到的截止日期、命中的原文片段。
+        ParsedTitle：原标题（保留日期片段）、识别到的截止日期、命中的原文片段。
     """
     raw = (text or "").strip()
     if not raw:
@@ -188,4 +178,5 @@ def parse_due_from_title(text: str, today: Optional[date] = None) -> ParsedTitle
     if due is None:  # 数字像日期但无法构成合法日期，按普通文本处理
         return ParsedTitle(raw, None, "")
 
-    return ParsedTitle(_clean_title(raw, match.group(0)), due, match.group(0))
+    # 标题保留原文（含日期片段），仅把识别结果作为截止日期返回
+    return ParsedTitle(raw, due, match.group(0))
