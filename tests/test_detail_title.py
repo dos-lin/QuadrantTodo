@@ -126,6 +126,31 @@ class DetailTitleCommitTest(unittest.TestCase):
             "切换任务后编辑框应显示新任务标题",
         )
 
+    def test_re_show_same_task_preserves_cursor(self):
+        """标题编辑框聚焦时，重复渲染同一任务不重置光标位置（修复光标跳回开头）。"""
+        from unittest.mock import patch
+
+        task = self._show("原标题")
+        self.panel._loading = False
+        self.panel.title_edit.setPlainText("已修改标题")
+        # 将光标移到末尾，模拟真实编辑状态
+        cursor = self.panel.title_edit.textCursor()
+        cursor.movePosition(cursor.MoveOperation.End)
+        self.panel.title_edit.setTextCursor(cursor)
+        saved_position = cursor.position()
+        # 模拟保存后 task.title 已更新，且外部刷新再次调用 show_task
+        task.title = "已修改标题"
+        # offscreen 环境下 setFocus 不一定生效，强制 hasFocus 返回 True 验证分支
+        with patch.object(self.panel.title_edit, "hasFocus", return_value=True):
+            self.panel.show_task(task, self.today, self.thresholds)
+        self.assertEqual(
+            self.panel.title_edit.toPlainText(), "已修改标题",
+        )
+        self.assertEqual(
+            self.panel.title_edit.textCursor().position(), saved_position,
+            "重复渲染同一任务时应保持光标位置",
+        )
+
 
 class ActionButtonsGridLayoutTest(unittest.TestCase):
     """操作按钮两列网格布局（2026-09-11 用户截图反馈）。"""

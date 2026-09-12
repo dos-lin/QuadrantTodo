@@ -488,30 +488,37 @@ class MainWindow(QMainWindow):
             ("Ctrl+F", self.focus_search),
             ("Ctrl+,", self.open_settings),
             ("Ctrl+Q", self.request_quit),
-            ("Up", lambda: self._cycle_selection(-1)),
-            ("Down", lambda: self._cycle_selection(1)),
-            ("F2", self._rename_selection),
-            ("Delete", lambda: self._act_on_selection(self.on_delete_requested)),
             ("Escape", self._on_escape),
         ]
         for sequence, handler in pairs:
             shortcut = QShortcut(QKeySequence(sequence), self)
             shortcut.activated.connect(handler)
 
-        # Space：切换选中任务完成态（PRD F14）。但焦点落在文本输入控件时不拦截，
-        # 保证标题/备注/快速添加等输入框内可正常输入空格（修复 F14 缺陷）。
-        self._space_shortcut = QShortcut(QKeySequence("Space"), self)
-        self._space_shortcut.activated.connect(
-            lambda: self._act_on_selection(self.on_task_toggled)
-        )
+        # 任务导航/操作快捷键：焦点落在文本输入控件时禁用，避免编辑标题/备注时
+        # 误触发切换选中、删除、完成等操作，导致光标被重置到开头（#bug-fix）。
+        self._task_action_shortcuts: list[QShortcut] = []
+        task_action_pairs = [
+            ("Up", lambda: self._cycle_selection(-1)),
+            ("Down", lambda: self._cycle_selection(1)),
+            ("F2", self._rename_selection),
+            ("Delete", lambda: self._act_on_selection(self.on_delete_requested)),
+            ("Space", lambda: self._act_on_selection(self.on_task_toggled)),
+        ]
+        for sequence, handler in task_action_pairs:
+            shortcut = QShortcut(QKeySequence(sequence), self)
+            shortcut.activated.connect(handler)
+            self._task_action_shortcuts.append(shortcut)
+
         app = QApplication.instance()
         if app is not None:
             app.focusChanged.connect(self._on_focus_changed)
         self._on_focus_changed(None, app.focusWidget() if app else None)
 
     def _on_focus_changed(self, _old, now) -> None:
-        """焦点变化：输入框聚焦时禁用 Space 快捷键，避免吞掉空格输入。"""
-        self._space_shortcut.setEnabled(not _is_editing_widget(now))
+        """焦点变化：输入框聚焦时禁用任务操作快捷键，避免干扰文本输入。"""
+        editing = _is_editing_widget(now)
+        for shortcut in self._task_action_shortcuts:
+            shortcut.setEnabled(not editing)
 
     # ================================================================ 数据
 

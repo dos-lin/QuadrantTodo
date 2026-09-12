@@ -510,7 +510,10 @@ class DetailPanel(QFrame):
         self._title_timer.stop()
         self._loading = True
 
-        self.title_edit.setPlainText(task.title)
+        # 标题：若输入框正聚焦且当前文本已与任务一致，避免 setPlainText 重置光标到开头
+        title_text = task.title or ""
+        if not (self.title_edit.hasFocus() and self.title_edit.toPlainText() == title_text):
+            self.title_edit.setPlainText(title_text)
         self.note_edit.setPlainText(task.note)
         self._load_quadrant(task)
         self._load_due(task)

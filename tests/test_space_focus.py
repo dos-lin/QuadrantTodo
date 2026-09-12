@@ -1,4 +1,4 @@
-"""F14 修复：输入框聚焦时 Space 快捷键不拦截，保证可输入空格。"""
+"""F14 修复：输入框聚焦时任务操作快捷键不拦截，保证可正常输入空格/删除等。"""
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -35,25 +35,29 @@ def test_non_editing_widgets_not_blocked() -> None:
     assert _is_editing_widget(None) is False
 
 
-def test_space_shortcut_disabled_on_edit_focus() -> None:
-    """MainWindow 焦点联动：输入框聚焦时禁用 Space，离开后恢复（F14 缺陷修复）。"""
+def _shortcut_enabled_states(win) -> list[bool]:
+    return [s.isEnabled() for s in win._task_action_shortcuts]
+
+
+def test_task_action_shortcuts_disabled_on_edit_focus() -> None:
+    """MainWindow 焦点联动：输入框聚焦时禁用任务操作快捷键（Space/Delete/Up/Down/F2），离开后恢复。"""
     from quadrant_todo.app import MainWindow
 
     db = __import__("quadrant_todo.db", fromlist=["Database"]).Database()
     db.connect()
     try:
         win = MainWindow(db)
-        # 初始无焦点控件：Space 应启用
-        assert win._space_shortcut.isEnabled() is True
+        # 初始无焦点控件：任务操作快捷键应启用
+        assert all(_shortcut_enabled_states(win)) is True
 
         editor = QLineEdit()
         # 模拟焦点落到输入框（offscreen 下 setFocus 未必 emit focusChanged，直接驱动 handler）
         win._on_focus_changed(None, editor)
-        assert win._space_shortcut.isEnabled() is False
+        assert any(_shortcut_enabled_states(win)) is False
 
         # 焦点离开输入框到其他非编辑控件：恢复启用
         win._on_focus_changed(editor, QWidget())
-        assert win._space_shortcut.isEnabled() is True
+        assert all(_shortcut_enabled_states(win)) is True
         win.close()
     finally:
         db.close()
