@@ -19,6 +19,7 @@ from PySide6.QtWidgets import QApplication, QLabel
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from quadrant_todo.db import Database
+from quadrant_todo.markdown import markdown_to_html
 from quadrant_todo.models import Article, StickyNote, Subtask, Task
 from quadrant_todo.views.article import ArticleView, MAX_ARTICLE_CHARS, _highlight
 
@@ -201,6 +202,132 @@ class TestArticleView(unittest.TestCase):
         # 保存按钮应存在（未 show 的 widget isVisible 可能为 False，只校验存在与文案）
         self.assertIsNotNone(view.save_btn)
         self.assertEqual(view.save_btn.text(), "保存")
+
+
+class TestMarkdownConverter(unittest.TestCase):
+    """纯函数单测：覆盖各语法与边界（不引入第三方 Markdown 库）。"""
+
+    def test_empty(self):
+        self.assertEqual(markdown_to_html(""), "")
+        self.assertEqual(markdown_to_html(None), "")
+
+    def test_headings(self):
+        html = markdown_to_html("# 一\n## 二\n### 三")
+        self.assertIn("<h1>一</h1>", html)
+        self.assertIn("<h2>二</h2>", html)
+        self.assertIn("<h3>三</h3>", html)
+
+    def test_bold_italic(self):
+        html = markdown_to_html("**粗** 和 *斜* 还有 _强调_")
+        self.assertIn("<b>粗</b>", html)
+        self.assertIn("<i>斜</i>", html)
+        self.assertIn("<i>强调</i>", html)
+
+    def test_inline_code(self):
+        html = markdown_to_html("用 `code` 包裹")
+        self.assertIn("<code>code</code>", html)
+
+    def test_lists(self):
+        ul = markdown_to_html("- 甲\n- 乙")
+        self.assertIn("<ul><li>甲</li><li>乙</li></ul>", ul)
+        ol = markdown_to_html("1. 一\n2. 二")
+        self.assertIn("<ol><li>一</li><li>二</li></ol>", ol)
+
+    def test_quote_and_hr(self):
+        html = markdown_to_html("> 引用一行\n\n---\n\n正文")
+        self.assertIn("<blockquote>引用一行</blockquote>", html)
+        self.assertIn("<hr>", html)
+        self.assertIn("<p>正文</p>", html)
+
+    def test_link(self):
+        html = markdown_to_html("看 [百度](https://baidu.com)")
+        self.assertIn('<a href="https://baidu.com">百度</a>', html)
+
+    def test_code_block_escaped(self):
+        html = markdown_to_html("```\nif a < b: print(1)\n```")
+        self.assertIn("&lt;", html)
+        self.assertIn("<pre><code>", html)
+
+    def test_image_dropped(self):
+        html = markdown_to_html("有图 ![alt](http://x.com/a.png) 结束")
+        self.assertNotIn("<img", html)
+        self.assertNotIn("alt", html)
+
+    def test_xss_escaped(self):
+        html = markdown_to_html("<script>alert(1)</script> & <b>x</b>")
+        self.assertNotIn("<script>", html)
+        self.assertIn("&lt;script&gt;", html)
+        self.assertIn("&amp;", html)
+
+    def test_underscore_in_link_not_italicized(self):
+        html = markdown_to_html("见 [文档](https://a.com/b_c_d)")
+        self.assertIn('<a href="https://a.com/b_c_d">文档</a>', html)
+
+
+class TestArticleViewPreview(unittest.TestCase):
+    """UI 层：编辑/预览切换的可见性与渲染结果。"""
+
+    def setUp(self):
+        _get_app()
+
+    def _select(self, view, article):
+        view.show()  # offscreen 下 show() 后子控件 isVisible() 才反映自身可见性
+        view._selected_id = article.id
+        view._rendered_selected_id = None
+        view.render([article])
+
+    def test_default_edit_mode(self):
+        view = ArticleView()
+        art = Article(id="a1", title="测试", content="# 标题\n\n正文")
+        self._select(view, art)
+        self.assertTrue(view.content_edit.isVisible())
+        self.assertFalse(view.content_preview.isVisible())
+        self.assertFalse(view._preview_mode)
+
+    def test_toggle_to_preview_renders_and_swaps(self):
+        view = ArticleView()
+        art = Article(
+            id="a1",
+            title="测试",
+            content="# 标题\n\n这是 **加粗** 和 *斜体*。\n\n- 项目一\n- 项目二",
+        )
+        self._select(view, art)
+        view._on_mode_toggled(True)
+        self.assertTrue(view._preview_mode)
+        self.assertFalse(view.content_edit.isVisible())
+        self.assertTrue(view.content_preview.isVisible())
+        plain = view.content_preview.toPlainText()
+        self.assertIn("标题", plain)
+        self.assertIn("加粗", plain)
+        self.assertIn("项目一", plain)
+
+    def test_toggle_back_to_edit_keeps_source(self):
+        view = ArticleView()
+        art = Article(id="a1", title="测试", content="# 标题\n\n**加粗**")
+        self._select(view, art)
+        view._on_mode_toggled(True)
+        view._on_mode_toggled(False)
+        self.assertFalse(view._preview_mode)
+        self.assertTrue(view.content_edit.isVisible())
+        self.assertFalse(view.content_preview.isVisible())
+        self.assertIn("**加粗**", view.content_edit.toPlainText())
+
+    def test_preview_commits_pending_content(self):
+        """预览前若有未提交改动，切到预览应先落库（emit update_requested）。"""
+        view = ArticleView()
+        art = Article(id="a1", title="测试", content="原内容")
+        self._select(view, art)
+        emitted = []
+        view.update_requested.connect(
+            lambda aid, field, val: emitted.append((aid, field, val))
+        )
+        view.content_edit.setPlainText("# 新标题\n\n新内容 **bold**")
+        view._pending_content = "新内容 **bold**"
+        view._on_mode_toggled(True)
+        self.assertTrue(
+            any(f == "content" for (_, f, _) in emitted),
+            "切换到预览应触发 content 落库",
+        )
 
 
 if __name__ == "__main__":

@@ -1,9 +1,10 @@
 """文章模块（2026-09-10）。
 
 ArticleView：左侧搜索栏 + 文章标题列表，右侧标题 / 正文编辑 + 实时字数 + 标签。
-- 纯文本编辑（支持 Markdown 语法但不渲染）
-- 正文上限 100KB；右下角实时字数「X 字 / 100KB」
-- 搜索命中关键词在标题与预览片段中高亮
+- 正文编辑支持 Markdown 语法，并提供「编辑 / 预览」切换查看渲染效果
+  （渲染用纯标准库 markdown_to_html 转换，不引入第三方 Markdown 库）
+- 正文上限 10 万字；右下角实时字数「X 字 / 10万字」
+- 搜索命中关键词在标题与预览片段中高亮（列表摘要保持原文片段，不渲染）
 - 与任务 / 便签相互独立，复用 tag 表（article_tag 关联）但不与任务关联
 - 标题 / 正文自动保存：改动后 600ms 无输入自动落库；同时提供「保存」按钮和 Ctrl+S 快捷键
 """
@@ -22,10 +23,12 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QSplitter,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
+from ..markdown import markdown_to_html
 from ..models import Article, Tag
 from .common import clear_layout
 
@@ -68,6 +71,7 @@ class ArticleView(QWidget):
         self._over_limit: bool = False
         self._pending_title: str | None = None
         self._pending_content: str | None = None
+        self._preview_mode: bool = False
         self._build_ui()
 
     # ------------------------------------------------------------ UI
@@ -112,11 +116,49 @@ class ArticleView(QWidget):
         self.title_edit.textChanged.connect(self._on_title_changed)
         right_layout.addWidget(self._row("标题", self.title_edit))
 
+        # 工具栏：新建 / 保存 / 编辑 / 预览 / 删除
+        tool_bar = QHBoxLayout()
+        tool_bar.setSpacing(8)
+        self.new_btn = QPushButton("新建文章")
+        self.new_btn.setToolTip("新建一篇文章")
+        self.new_btn.clicked.connect(lambda: self.add_requested.emit("无标题文章"))
+        tool_bar.addWidget(self.new_btn)
+
+        self.save_btn = QPushButton("保存")
+        self.save_btn.setToolTip("立即保存（Ctrl+S）")
+        self.save_btn.clicked.connect(self._force_save)
+        tool_bar.addWidget(self.save_btn)
+
+        tool_bar.addStretch(1)
+
+        self._edit_btn = QPushButton("编辑")
+        self._edit_btn.setCheckable(True)
+        self._edit_btn.setChecked(True)
+        self._edit_btn.clicked.connect(lambda: self._on_mode_toggled(False))
+        tool_bar.addWidget(self._edit_btn)
+
+        self._preview_btn = QPushButton("预览")
+        self._preview_btn.setCheckable(True)
+        self._preview_btn.clicked.connect(lambda: self._on_mode_toggled(True))
+        tool_bar.addWidget(self._preview_btn)
+
+        self.delete_btn = QPushButton("删除文章")
+        self.delete_btn.setProperty("danger", True)
+        self.delete_btn.clicked.connect(self._on_delete)
+        tool_bar.addWidget(self.delete_btn)
+        right_layout.addLayout(tool_bar)
+
         self.content_edit = QPlainTextEdit()
-        self.content_edit.setPlaceholderText("正文（支持 Markdown 语法，不渲染）")
+        self.content_edit.setPlaceholderText("正文（支持 Markdown，点击「预览」查看渲染效果）")
         self.content_edit.setMinimumHeight(240)
         self.content_edit.textChanged.connect(self._on_content_changed)
         right_layout.addWidget(self.content_edit, 1)
+
+        # 预览：只读富文本，渲染 markdown_to_html 结果
+        self.content_preview = QTextEdit()
+        self.content_preview.setReadOnly(True)
+        self.content_preview.setVisible(False)
+        right_layout.addWidget(self.content_preview, 1)
 
         # 字数、创建/修改时间、保存状态放在同一行
         meta_bar = QHBoxLayout()
@@ -133,23 +175,6 @@ class ArticleView(QWidget):
         right_layout.addLayout(meta_bar)
 
         right_layout.addWidget(self._build_tags_ui())
-
-        # 操作按钮行：新建 / 保存 / 删除 放在同一行
-        btn_bar = QHBoxLayout()
-        self.new_btn = QPushButton("新建文章")
-        self.new_btn.setToolTip("新建一篇文章")
-        self.new_btn.clicked.connect(lambda: self.add_requested.emit("无标题文章"))
-        btn_bar.addWidget(self.new_btn)
-        btn_bar.addStretch(1)
-        self.save_btn = QPushButton("保存")
-        self.save_btn.setToolTip("立即保存（Ctrl+S）")
-        self.save_btn.clicked.connect(self._force_save)
-        btn_bar.addWidget(self.save_btn)
-        self.delete_btn = QPushButton("删除文章")
-        self.delete_btn.setProperty("danger", True)
-        self.delete_btn.clicked.connect(self._on_delete)
-        btn_bar.addWidget(self.delete_btn)
-        right_layout.addLayout(btn_bar)
 
         splitter.addWidget(right)
         splitter.setStretchFactor(0, 1)
@@ -272,13 +297,15 @@ class ArticleView(QWidget):
         self.title_edit.setReadOnly(False)
         self.title_edit.setPlaceholderText("文章标题")
         self.content_edit.setReadOnly(False)
-        self.content_edit.setPlaceholderText("正文（支持 Markdown 语法，不渲染）")
+        self.content_edit.setPlaceholderText("正文（支持 Markdown，点击「预览」查看渲染效果）")
         self.title_edit.setText(article.title or "")
         self.content_edit.setPlainText(article.content or "")
         self._update_word_count(article.content or "")
         self._update_meta_label(article)
         self._render_tags()
         self._loading = False
+        # 按当前模式呈现正文（预览模式下直接渲染新文章）
+        self._apply_mode()
 
     def _clear_right(self) -> None:
         self._loading = True
@@ -288,6 +315,12 @@ class ArticleView(QWidget):
         self.content_edit.setReadOnly(True)
         self.content_edit.setPlaceholderText("选择或新建一篇文章以开始编辑")
         self.content_edit.clear()
+        # 复位到编辑模式
+        self._preview_mode = False
+        self._edit_btn.setChecked(True)
+        self._preview_btn.setChecked(False)
+        self.content_preview.setVisible(False)
+        self.content_edit.setVisible(True)
         self.word_label.clear()
         self.meta_label.clear()
         self._set_status("未选择文章", "meta")
@@ -326,6 +359,30 @@ class ArticleView(QWidget):
 
     def _on_search(self, text: str) -> None:
         self.search_requested.emit(text.strip())
+
+    def _on_mode_toggled(self, preview: bool) -> None:
+        """切换 编辑 / 预览 模式。"""
+        if preview == self._preview_mode:
+            return
+        self._preview_mode = preview
+        self._edit_btn.setChecked(not preview)
+        self._preview_btn.setChecked(preview)
+        self._apply_mode()
+
+    def _apply_mode(self) -> None:
+        """根据当前模式呈现正文区。预览模式下若有未提交改动先落库，再渲染。"""
+        if self._preview_mode:
+            if self._pending_content is not None:
+                self._content_timer.stop()
+                self._commit_content()
+            self.content_preview.setHtml(
+                markdown_to_html(self.content_edit.toPlainText())
+            )
+            self.content_edit.setVisible(False)
+            self.content_preview.setVisible(True)
+        else:
+            self.content_preview.setVisible(False)
+            self.content_edit.setVisible(True)
 
     def _on_title_changed(self) -> None:
         if self._loading or not self._selected_id:
