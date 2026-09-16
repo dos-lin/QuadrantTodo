@@ -115,6 +115,34 @@ class TestArticleDB(unittest.TestCase):
         self.assertIn("s2", ids)
         title_only = self.db.search_articles("种植")
         self.assertEqual([a.id for a in title_only], ["s1"])
+        # 范围限定前缀
+        self.assertEqual([a.id for a in self.db.search_articles("title:种植")], ["s1"])
+        self.assertEqual([a.id for a in self.db.search_articles("content:区别")], ["s2"])
+        # 前缀大小写不敏感
+        self.assertEqual([a.id for a in self.db.search_articles("Title:种植")], ["s1"])
+        # 无前缀等价于标题 + 正文都搜（顺序由更新时间决定，比较集合）
+        self.assertEqual({a.id for a in self.db.search_articles("苹果")}, {"s1", "s2"})
+
+    def test_search_articles_by_tag(self):
+        self.db.save_article(Article(id="tg1", title="无关标题", content="无关正文"))
+        tag = self.db.create_tag("水果")
+        self.assertIsNotNone(tag)
+        self.db.set_article_tags("tg1", [tag.id])
+        # tag: 前缀只搜标签名
+        self.assertEqual([a.id for a in self.db.search_articles("tag:水果")], ["tg1"])
+        # 标签名不出现在正文时，title:/content: 不应命中
+        self.assertEqual([a.id for a in self.db.search_articles("title:水果")], [])
+        self.assertEqual([a.id for a in self.db.search_articles("content:水果")], [])
+        # 无前缀搜索借标签命中
+        self.assertIn("tg1", [a.id for a in self.db.search_articles("水果")])
+
+    def test_parse_search_query(self):
+        p = self.db.parse_search_query
+        self.assertEqual(p("title:苹果"), ("title", "苹果"))
+        self.assertEqual(p("TAG:水果"), ("tag", "水果"))
+        self.assertEqual(p("  content:  区别 "), ("content", "区别"))
+        self.assertEqual(p("苹果种植"), ("all", "苹果种植"))
+        self.assertEqual(p(""), ("all", ""))
 
     def test_sticky_top_ordering(self):
         normal = StickyNote(content="普通", top=False)
@@ -232,6 +260,36 @@ class TestMarkdownConverter(unittest.TestCase):
         self.assertIn("<ul><li>甲</li><li>乙</li></ul>", ul)
         ol = markdown_to_html("1. 一\n2. 二")
         self.assertIn("<ol><li>一</li><li>二</li></ol>", ol)
+
+    def test_table_basic(self):
+        md = "| 名称 | 数量 |\n| --- | --- |\n| 苹果 | 3 |\n| 香蕉 | 5 |"
+        html = markdown_to_html(md)
+        self.assertIn("<table", html)
+        self.assertIn("<th>名称</th>", html)
+        self.assertIn("<th>数量</th>", html)
+        self.assertIn("<td>苹果</td>", html)
+        self.assertIn("<td>5</td>", html)
+        self.assertIn("</table>", html)
+
+    def test_table_alignment(self):
+        md = "| 左 | 中 | 右 |\n| :--- | :---: | ---: |\n| a | b | c |"
+        html = markdown_to_html(md)
+        self.assertIn('<th align="left">左</th>', html)
+        self.assertIn('<th align="center">中</th>', html)
+        self.assertIn('<th align="right">右</th>', html)
+        self.assertIn('<td align="right">c</td>', html)
+
+    def test_table_no_false_positive(self):
+        # `---` 单独成行（无 |）应视为分隔线而非表格
+        html = markdown_to_html("标题 | 副标题\n\n---\n\n正文")
+        self.assertIn("<hr>", html)
+        self.assertNotIn("<table", html)
+
+    def test_table_inline_formatting(self):
+        md = "| 项 | 说明 |\n| --- | --- |\n| **粗** | `code` |"
+        html = markdown_to_html(md)
+        self.assertIn("<b>粗</b>", html)
+        self.assertIn("<code>code</code>", html)
 
     def test_quote_and_hr(self):
         html = markdown_to_html("> 引用一行\n\n---\n\n正文")

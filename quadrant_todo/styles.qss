@@ -78,6 +78,7 @@ QMainWindow, QFrame {
     color: #80868b;
     font-size: 12px;
     font-weight: 600;
+    margin-top: 8px;   /* 紧凑布局下仍保留分组之间的呼吸感 */
 }
 [role="view-title"] {
     font-size: 16px;

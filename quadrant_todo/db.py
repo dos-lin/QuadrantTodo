@@ -480,15 +480,67 @@ class Database:
         self._write("DELETE FROM article_tag WHERE article_id = ?", (article_id,))
         self._write("DELETE FROM article WHERE id = ?", (article_id,))
 
+    # 搜索语法前缀 -> 作用域（按长度降序无必要，首个匹配即为最前前缀）
+    _SEARCH_SCOPES = (("title:", "title"), ("content:", "content"), ("tag:", "tag"))
+
+    def parse_search_query(self, keyword: str) -> tuple[str, str]:
+        """解析文章搜索语法，返回 (scope, term)。
+
+        scope ∈ {"all","title","content","tag"}：
+        - 无前缀：同时搜索标题 / 正文 / 标签
+        - `title:xxx` 只搜标题；`content:xxx` 只搜正文；`tag:xxx` 只搜标签
+        term 为去掉前缀并裁掉首尾空白后的查询词（用于列表高亮）。
+        前缀匹配不区分大小写。
+        """
+        if not keyword:
+            return "all", ""
+        kw = keyword.strip()
+        low = kw.lower()
+        for prefix, scope in self._SEARCH_SCOPES:
+            if low.startswith(prefix):
+                return scope, kw[len(prefix):].strip()
+        return "all", kw
+
     def search_articles(self, keyword: str) -> list["Article"]:
-        """按标题 + 正文模糊匹配（文章模块搜索）。"""
+        """按搜索语法在标题 / 正文 / 标签中模糊匹配文章。
+
+        支持 `title:` / `content:` / `tag:` 前缀限定范围；无前缀则三者都搜。
+        空查询词视为未筛选（返回全部）。
+        """
         assert self.conn is not None
-        kw = f"%{keyword}%"
-        cur = self.conn.execute(
-            "SELECT * FROM article WHERE title LIKE ? OR content LIKE ? "
-            "ORDER BY updated_at DESC, created_at DESC",
-            (kw, kw),
-        )
+        scope, term = self.parse_search_query(keyword)
+        if not term:
+            return self.get_articles()
+        kw = f"%{term}%"
+        if scope == "title":
+            cur = self.conn.execute(
+                "SELECT * FROM article WHERE title LIKE ? "
+                "ORDER BY updated_at DESC, created_at DESC",
+                (kw,),
+            )
+        elif scope == "content":
+            cur = self.conn.execute(
+                "SELECT * FROM article WHERE content LIKE ? "
+                "ORDER BY updated_at DESC, created_at DESC",
+                (kw,),
+            )
+        elif scope == "tag":
+            cur = self.conn.execute(
+                "SELECT DISTINCT a.* FROM article a "
+                "JOIN article_tag at ON at.article_id = a.id "
+                "JOIN tag t ON t.id = at.tag_id "
+                "WHERE t.name LIKE ? ORDER BY a.updated_at DESC, a.created_at DESC",
+                (kw,),
+            )
+        else:  # all
+            cur = self.conn.execute(
+                "SELECT DISTINCT a.* FROM article a "
+                "LEFT JOIN article_tag at ON at.article_id = a.id "
+                "LEFT JOIN tag t ON t.id = at.tag_id "
+                "WHERE a.title LIKE ? OR a.content LIKE ? OR t.name LIKE ? "
+                "ORDER BY a.updated_at DESC, a.created_at DESC",
+                (kw, kw, kw),
+            )
         return [Article.from_row(r) for r in cur.fetchall()]
 
     def get_article_tag_ids(self, article_id: str) -> list[str]:

@@ -88,7 +88,7 @@ class ArticleView(QWidget):
         root.addLayout(bar)
 
         self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText("搜索文章标题或正文…")
+        self.search_edit.setPlaceholderText("搜索：标题/正文/标签（title:、content:、tag: 限定范围）")
         self.search_edit.textChanged.connect(self._on_search)
         root.addWidget(self.search_edit)
 
@@ -117,6 +117,7 @@ class ArticleView(QWidget):
         right_layout.addWidget(self._row("标题", self.title_edit))
 
         # 工具栏：新建 / 保存 / 编辑 / 预览 / 删除
+        # 操作按钮放在左侧，删除按钮单独在右侧，避免创作时误触
         tool_bar = QHBoxLayout()
         tool_bar.setSpacing(8)
         self.new_btn = QPushButton("新建文章")
@@ -129,8 +130,6 @@ class ArticleView(QWidget):
         self.save_btn.clicked.connect(self._force_save)
         tool_bar.addWidget(self.save_btn)
 
-        tool_bar.addStretch(1)
-
         self._edit_btn = QPushButton("编辑")
         self._edit_btn.setCheckable(True)
         self._edit_btn.setChecked(True)
@@ -142,8 +141,11 @@ class ArticleView(QWidget):
         self._preview_btn.clicked.connect(lambda: self._on_mode_toggled(True))
         tool_bar.addWidget(self._preview_btn)
 
+        tool_bar.addStretch(1)
+
         self.delete_btn = QPushButton("删除文章")
         self.delete_btn.setProperty("danger", True)
+        self.delete_btn.setToolTip("删除当前文章")
         self.delete_btn.clicked.connect(self._on_delete)
         tool_bar.addWidget(self.delete_btn)
         right_layout.addLayout(tool_bar)

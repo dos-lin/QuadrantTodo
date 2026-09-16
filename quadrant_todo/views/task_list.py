@@ -32,8 +32,9 @@ class TaskListView(QScrollArea):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._content = QWidget()
         self._layout = QVBoxLayout(self._content)
-        self._layout.setContentsMargins(12, 12, 12, 12)
-        self._layout.setSpacing(12)
+        # 2026-09-16 紧凑化：外边距 12→10、条目间距 12→2（分组标题之间仍有留白）
+        self._layout.setContentsMargins(10, 10, 10, 10)
+        self._layout.setSpacing(2)
         self._layout.addStretch(1)
         self.setWidget(self._content)
 

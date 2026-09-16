@@ -64,7 +64,8 @@ class TaskListWidget(QListWidget):
         # 在重建后的列表上误命中其他行（通常是第一行）造成"实际选中第 N 个、
         # 视觉显示第一个被选中"的错位（用户反馈 2026-09-04）。
         self.setSelectionMode(QAbstractItemView.NoSelection)
-        self.setSpacing(2)
+        # 2026-09-16 紧凑化：条目间距 2→1
+        self.setSpacing(1)
         self.setFrameShape(QFrame.NoFrame)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -183,8 +184,9 @@ class QuadrantPanel(QFrame):
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 10, 12, 10)
-        layout.setSpacing(6)
+        # 2026-09-16 紧凑化：面板内边距 12/10→8/6、区块间距 6→4
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(4)
 
         header = QHBoxLayout()
         self.title_label = QLabel(QUADRANT_LABELS[self.quadrant])
@@ -303,8 +305,9 @@ class BoardView(QWidget):
 
     def _build_ui(self) -> None:
         grid = QGridLayout(self)
-        grid.setContentsMargins(12, 12, 12, 12)
-        grid.setSpacing(12)
+        # 2026-09-16 紧凑化：外边距 12→8、象限间距 12→8，给列表让出更多纵向空间
+        grid.setContentsMargins(8, 8, 8, 8)
+        grid.setSpacing(8)
 
         positions = {
             Quadrant.Q1: (0, 0),

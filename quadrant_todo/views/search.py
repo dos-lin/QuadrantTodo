@@ -59,7 +59,9 @@ class SearchView(QWidget):
         row.addWidget(self.include_box)
         root.addWidget(bar)
 
-        # 便签命中区前置：与任务结果并列，但位置更靠上、更醒目
+        # 2026-09-16 用户要求：任务结果在前，小便签命中放在后面
+        root.addWidget(self._view, 1)
+
         self.sticky_header = QLabel()
         self.sticky_header.setStyleSheet(
             "font-size: 13px; font-weight: 600; color: #1967d2; padding: 8px 12px 4px 12px;"
@@ -69,16 +71,15 @@ class SearchView(QWidget):
         sticky_container = QWidget()
         self.sticky_area = QVBoxLayout(sticky_container)
         self.sticky_area.setContentsMargins(12, 0, 12, 8)
-        self.sticky_area.setSpacing(6)
+        self.sticky_area.setSpacing(4)
         self.sticky_scroll = QScrollArea()
         self.sticky_scroll.setWidgetResizable(True)
         self.sticky_scroll.setFrameShape(QFrame.NoFrame)
-        self.sticky_scroll.setMaximumHeight(200)
+        # 2026-09-16 用户反馈预览区太小看不到全部命中：200→360（约可容纳 9 条），超出仍可滚动
+        self.sticky_scroll.setMaximumHeight(360)
         self.sticky_scroll.setWidget(sticky_container)
         root.addWidget(self.sticky_scroll)
         self.sticky_scroll.setVisible(False)
-
-        root.addWidget(self._view, 1)
 
     def _dispatch_select(self, task_id: str) -> None:
         if self._on_select is not None:
@@ -98,14 +99,14 @@ class SearchView(QWidget):
 
     def _build_sticky_card(self, note) -> QWidget:
         preview = " ".join(str(note.content).split())
-        if len(preview) > 60:
-            preview = preview[:60] + "…"
+        if len(preview) > 150:
+            preview = preview[:150] + "…"
         btn = QPushButton(preview)
         btn.setFlat(True)
         btn.setToolTip(str(note.content))
         btn.setStyleSheet(
             f"QPushButton {{ background: {note.color}; border: none; border-radius: 6px;"
-            "  padding: 8px 10px; text-align: left; }"
+            "  padding: 6px 10px; text-align: left; }"
         )
         btn.clicked.connect(self.sticky_open_requested.emit)
         return btn

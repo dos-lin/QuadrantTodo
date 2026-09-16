@@ -12,7 +12,7 @@ APP_NAME = "QuadrantTodo"
 APP_TITLE = "四象限待办"
 ORG_NAME = "QuadrantTodo"
 
-VERSION = "1.2.2"
+VERSION = "1.2.3"
 
 
 def _anchor_dir() -> Path:

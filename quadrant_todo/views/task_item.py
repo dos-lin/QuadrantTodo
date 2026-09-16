@@ -26,7 +26,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QSizePolicy,
-    QVBoxLayout,
     QWidget,
 )
 
@@ -149,7 +148,8 @@ class TaskItemWidget(QFrame):
         self.threshold = threshold
         self.setFrameShape(QFrame.NoFrame)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.setMinimumHeight(48)
+        # 2026-09-16 用户要求条目更紧凑（单行布局）：48→28，一屏能看到更多待办
+        self.setMinimumHeight(28)
         self.setAttribute(Qt.WA_Hover, True)
         self._build_ui()
         self._apply_state()
@@ -157,18 +157,17 @@ class TaskItemWidget(QFrame):
     # ---------------------------------------------------------------- UI 构建
 
     def _build_ui(self) -> None:
+        # 2026-09-16 用户要求「一夜能看到更多待办」：改为单行布局——
+        # 日期 / 耗时元信息从第二行移到标题行右端，条目高度 ~38px → ~26px。
         root = QHBoxLayout(self)
-        root.setContentsMargins(8, 6, 8, 6)
-        root.setSpacing(8)
+        root.setContentsMargins(8, 3, 8, 3)
+        root.setSpacing(6)
 
         self.check = QCheckBox()
         self.check.setStyleSheet("background: transparent;")
         self.check.setToolTip("标记完成 / 取消完成")
         self.check.stateChanged.connect(lambda _: self.toggled.emit(self.task.id))
-        root.addWidget(self.check, 0, Qt.AlignTop)
-
-        center = QVBoxLayout()
-        center.setSpacing(2)
+        root.addWidget(self.check, 0, Qt.AlignVCenter)
 
         title_row = QHBoxLayout()
         title_row.setSpacing(6)
@@ -178,27 +177,27 @@ class TaskItemWidget(QFrame):
 
         self.title_label = _MarqueeLabel()
         title_row.addWidget(self.title_label, 1)
-        center.addLayout(title_row)
+        root.addLayout(title_row, 1)
 
+        # 元信息（日期 + 预计耗时）：单行显示，挤压时由标题让位
         self.meta_label = QLabel()
         self.meta_label.setProperty("role", "meta")
-        center.addWidget(self.meta_label)
-
-        root.addLayout(center, 1)
+        root.addWidget(self.meta_label, 0, Qt.AlignVCenter)
 
         # 右侧标记区
         self.lock_label = QLabel("锁定")
         self.lock_label.setProperty("badge", "lock")
         self.lock_label.setToolTip("已手动锁定，不再自动迁移")
-        root.addWidget(self.lock_label, 0, Qt.AlignTop)
+        root.addWidget(self.lock_label, 0, Qt.AlignVCenter)
 
         self.hint_label = QLabel()
         self.hint_label.setProperty("badge", "hint")
-        root.addWidget(self.hint_label, 0, Qt.AlignTop)
+        root.addWidget(self.hint_label, 0, Qt.AlignVCenter)
 
         # 悬浮操作区
         self.actions = QWidget()
-        self.actions.setStyleSheet("background: transparent;")
+        # 压缩悬浮按钮内边距，保证单行条目（~26px）悬浮时按钮不被裁切
+        self.actions.setStyleSheet("background: transparent; QPushButton { padding: 2px 6px; }")
         actions_layout = QHBoxLayout(self.actions)
         actions_layout.setContentsMargins(0, 0, 0, 0)
         actions_layout.setSpacing(2)
@@ -222,7 +221,7 @@ class TaskItemWidget(QFrame):
         actions_layout.addWidget(self.delete_btn)
 
         self.actions.setVisible(False)
-        root.addWidget(self.actions, 0, Qt.AlignTop)
+        root.addWidget(self.actions, 0, Qt.AlignVCenter)
 
     # ---------------------------------------------------------------- 状态渲染
 

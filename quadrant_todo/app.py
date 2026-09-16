@@ -937,11 +937,17 @@ class MainWindow(QMainWindow):
     def _render_article(self) -> None:
         """渲染文章列表页；搜索态按关键词过滤，并带上当前文章的标签。"""
         keyword = self.article_filter_keyword
-        articles = self.db.search_articles(keyword) if keyword else self.db.get_articles()
+        if keyword:
+            articles = self.db.search_articles(keyword)
+            # 列表高亮用去掉前缀后的纯净查询词（title:/content:/tag: 前缀不进高亮）
+            _, highlight_kw = self.db.parse_search_query(keyword)
+        else:
+            articles = self.db.get_articles()
+            highlight_kw = None
         active_id = getattr(self.article_view, "_selected_id", None)
         self.article_view.render(
             articles,
-            keyword=keyword or None,
+            keyword=highlight_kw or None,
             all_tags=self.db.get_tags(),
             active_tag_ids=self.db.get_article_tag_ids(active_id) if active_id else [],
         )
