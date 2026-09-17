@@ -58,6 +58,7 @@ class ArticleView(QWidget):
     tag_add_requested = Signal(str, str)    # (article_id, 标签名) 新建或复用
     tag_remove_requested = Signal(str, str) # (article_id, tag_id)
     selection_changed = Signal(str)         # 左侧列表切换选中文章（id）
+    export_requested = Signal(str)          # 导出当前文章为 Markdown（携带 article_id）
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -140,6 +141,16 @@ class ArticleView(QWidget):
         self._preview_btn.setCheckable(True)
         self._preview_btn.clicked.connect(lambda: self._on_mode_toggled(True))
         tool_bar.addWidget(self._preview_btn)
+
+        self.export_btn = QPushButton("导出")
+        self.export_btn.setToolTip("导出当前文章为 Markdown（含标签）")
+        self.export_btn.setEnabled(False)
+        self.export_btn.clicked.connect(
+            lambda: self.export_requested.emit(self._selected_id)
+            if self._selected_id
+            else None
+        )
+        tool_bar.addWidget(self.export_btn)
 
         tool_bar.addStretch(1)
 
@@ -271,6 +282,7 @@ class ArticleView(QWidget):
         else:
             self._clear_right()
             self._rendered_selected_id = None
+            self.export_btn.setEnabled(False)
 
     def _build_list_item(self, article: Article) -> QWidget:
         frame = QFrame()
@@ -356,6 +368,7 @@ class ArticleView(QWidget):
             return
         article = self._articles[row]
         self._selected_id = article.id
+        self.export_btn.setEnabled(True)
         # 通过信号让应用层重新渲染右侧标签与时间，避免上一篇文章标签残留
         self.selection_changed.emit(article.id)
 

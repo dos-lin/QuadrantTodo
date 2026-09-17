@@ -69,3 +69,28 @@ def current_scheme() -> str:
 
 def is_dark() -> bool:
     return _ACTIVE_SCHEME == config.THEME_DARK
+
+
+# 象限语义色（与 styles.qss / styles/dark.qss 的 [quadrant-title] 颜色保持一致），
+# 供 QTabWidget 页签等无法用 QSS 属性选择器覆盖的场景内联取色。
+QUADRANT_TITLE_COLORS: dict[str, dict[str, str]] = {
+    "light": {
+        "Q1": "#c0392b",  # 红：重要且紧急
+        "Q2": "#1a56c4",  # 蓝：重要不紧急
+        "Q3": "#b07800",  # 橙：紧急不重要
+        "Q4": "#5f6368",  # 灰：不重要不紧急
+    },
+    "dark": {
+        "Q1": "#f28b82",
+        "Q2": "#8ab4f8",
+        "Q3": "#fdd663",
+        "Q4": "#c0c4c8",
+    },
+}
+
+
+def quadrant_color(q_value: str) -> str:
+    """按当前配色返回象限语义色（q_value 形如 'Q1'）。"""
+    return QUADRANT_TITLE_COLORS.get(_ACTIVE_SCHEME, QUADRANT_TITLE_COLORS["light"]).get(
+        q_value, "#5f6368"
+    )

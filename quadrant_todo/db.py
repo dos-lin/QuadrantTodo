@@ -550,6 +550,17 @@ class Database:
         )
         return [r["tag_id"] for r in cur.fetchall()]
 
+    def get_article_tag_names(self, article_id: str) -> list[str]:
+        """文章导出的标签名列表（按名称排序）。"""
+        assert self.conn is not None
+        cur = self.conn.execute(
+            "SELECT t.name FROM article_tag at "
+            "JOIN tag t ON t.id = at.tag_id "
+            "WHERE at.article_id = ? ORDER BY t.name",
+            (article_id,),
+        )
+        return [r["name"] for r in cur.fetchall()]
+
     def set_article_tags(self, article_id: str, tag_ids: list[str]) -> None:
         """用给定标签集合整体替换文章的标签关联。"""
         assert self.conn is not None

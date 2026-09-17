@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QScrollArea,
+    QSplitter,
     QVBoxLayout,
     QWidget,
 )
@@ -60,13 +61,16 @@ class SearchView(QWidget):
         root.addWidget(bar)
 
         # 2026-09-16 用户要求：任务结果在前，小便签命中放在后面
-        root.addWidget(self._view, 1)
+        # 2026-09-17 用户反馈便签区被压得太小：改为竖向分割面板，两部分高度可拖拽，
+        # 初始高度在 render_stickies 里按便签内容自适应。
+        self._splitter = QSplitter(Qt.Vertical)
+        self._splitter.setChildrenCollapsible(False)
+        self._splitter.addWidget(self._view)
 
         self.sticky_header = QLabel()
         self.sticky_header.setStyleSheet(
             "font-size: 13px; font-weight: 600; color: #1967d2; padding: 8px 12px 4px 12px;"
         )
-        root.addWidget(self.sticky_header)
 
         sticky_container = QWidget()
         self.sticky_area = QVBoxLayout(sticky_container)
@@ -75,11 +79,20 @@ class SearchView(QWidget):
         self.sticky_scroll = QScrollArea()
         self.sticky_scroll.setWidgetResizable(True)
         self.sticky_scroll.setFrameShape(QFrame.NoFrame)
-        # 2026-09-16 用户反馈预览区太小看不到全部命中：200→360（约可容纳 9 条），超出仍可滚动
-        self.sticky_scroll.setMaximumHeight(360)
+        self.sticky_scroll.setMinimumHeight(120)
         self.sticky_scroll.setWidget(sticky_container)
-        root.addWidget(self.sticky_scroll)
-        self.sticky_scroll.setVisible(False)
+
+        sticky_pane = QWidget()
+        sticky_pane_layout = QVBoxLayout(sticky_pane)
+        sticky_pane_layout.setContentsMargins(0, 0, 0, 0)
+        sticky_pane_layout.setSpacing(0)
+        sticky_pane_layout.addWidget(self.sticky_header)
+        sticky_pane_layout.addWidget(self.sticky_scroll)
+        self._splitter.addWidget(sticky_pane)
+        sticky_pane.setVisible(False)
+        self._sticky_pane = sticky_pane
+
+        root.addWidget(self._splitter, 1)
 
     def _dispatch_select(self, task_id: str) -> None:
         if self._on_select is not None:
@@ -88,7 +101,7 @@ class SearchView(QWidget):
     def render_stickies(self, notes: list, keyword: str = "") -> None:
         """渲染便签命中区；无命中时隐藏整个区块。"""
         clear_layout(self.sticky_area)
-        self.sticky_scroll.setVisible(bool(notes))
+        self._sticky_pane.setVisible(bool(notes))
         if not notes:
             self.sticky_header.setText("")
             return
@@ -140,3 +153,32 @@ class SearchView(QWidget):
         )
         self.include_box.setChecked(include_closed)
         self.render_stickies(stickies, keyword)
+        self._sync_splitter(bool(stickies))
+
+    def _task_content_height(self) -> int:
+        """任务列表内容总高度（含分组标题、上下 margin），用于便签区动态跟随。"""
+        lay = self._view.widget().layout()
+        m = lay.contentsMargins()
+        n = lay.count()
+        total = m.top() + m.bottom() + lay.spacing() * max(n - 1, 0)
+        for i in range(n):
+            w = lay.itemAt(i).widget()
+            if w is not None:
+                # sizeHint 可能低于显式 minimumHeight（如单行条目 26px），取较大者
+                total += max(w.sizeHint().height(), w.minimumHeight())
+            else:
+                total += lay.itemAt(i).sizeHint().height()
+        return total
+
+    def _sync_splitter(self, has_stickies: bool) -> None:
+        """便签区动态紧跟任务结果：任务区按内容自适应，便签区吃剩余空间。
+
+        任务少 → 任务区缩到内容高度，便签区变大；任务多 → 任务区最多占
+        （窗口-120px），便签区保底 120px 内部滚动。分隔条仍可手动拖拽。
+        """
+        pane_h = max(self._splitter.height(), 400)
+        if not has_stickies:
+            self._splitter.setSizes([pane_h, 0])
+            return
+        task_h = min(self._task_content_height(), pane_h - self.sticky_scroll.minimumHeight())
+        self._splitter.setSizes([task_h, pane_h - task_h])

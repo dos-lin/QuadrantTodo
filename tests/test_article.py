@@ -71,6 +71,15 @@ class TestArticleModel(unittest.TestCase):
         self.assertTrue(back.top)
         self.assertFalse(StickyNote(content="y", top=False).to_row()["top"])
 
+    def test_to_markdown_includes_tags(self):
+        a = Article(id="a9", title="导出测试", content="# 标题\n正文 **x**")
+        md = a.to_markdown(["读书", "笔记"])
+        self.assertTrue(md.startswith("# 导出测试"))
+        self.assertIn("> 标签：读书, 笔记", md)
+        self.assertIn("# 标题", md)  # 正文原样保留
+        # 无标签时不出现标签行
+        self.assertNotIn("> 标签", a.to_markdown([]))
+
 
 class TestArticleDB(unittest.TestCase):
     def setUp(self):

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -469,6 +470,7 @@ class MainWindow(QMainWindow):
         self.article_view.tag_add_requested.connect(self.on_article_tag_add)
         self.article_view.tag_remove_requested.connect(self.on_article_tag_remove)
         self.article_view.selection_changed.connect(self._render_article)
+        self.article_view.export_requested.connect(self.export_article_markdown)
 
         # F18 热力图年份切换
         self.heatmap_view.year_changed.connect(self._render_heatmap)
@@ -1547,6 +1549,28 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "导出失败", str(exc))
             return
         self.db.log_event("data_export")
+        QMessageBox.information(self, "导出完成", f"已导出到\n{path}")
+
+    def export_article_markdown(self, article_id: str) -> None:
+        """单篇文章导出为 Markdown（零依赖，含标签）。"""
+        article = next((a for a in self.db.get_articles() if a.id == article_id), None)
+        if article is None:
+            return
+        tag_names = self.db.get_article_tag_names(article_id)
+        safe = re.sub(r'[\\/:*?"<>|]', "_", article.title).strip()
+        default_name = (safe or article.created_at.strftime("%Y%m%d")) + ".md"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "导出文章", default_name, "Markdown 文件 (*.md)"
+        )
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(article.to_markdown(tag_names))
+        except OSError as exc:
+            QMessageBox.warning(self, "导出失败", str(exc))
+            return
+        self.db.log_event("article_export")
         QMessageBox.information(self, "导出完成", f"已导出到\n{path}")
 
     def import_data(self) -> None:

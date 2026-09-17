@@ -473,6 +473,21 @@ class Article:
             "updatedAt": self.updated_at.isoformat() if self.updated_at else None,
         }
 
+    def to_markdown(self, tag_names: "list[str] | None" = None) -> str:
+        """单篇导出为 Markdown 源码（零依赖）。
+
+        标题作为一级标题，标签以引用行置于标题下方（不污染正文层级），
+        正文原样输出（content 本身即 Markdown 源码）。
+        """
+        tag_names = tag_names or []
+        lines = [f"# {self.title}", ""]
+        if tag_names:
+            lines.append(f"> 标签：{', '.join(tag_names)}")
+            lines.append("")
+        if self.content:
+            lines.append(self.content)
+        return "\n".join(lines) + "\n"
+
     @classmethod
     def from_export(cls, data: dict) -> "Article":
         return cls(

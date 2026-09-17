@@ -24,7 +24,6 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QPushButton,
     QSizePolicy,
     QWidget,
 )
@@ -53,6 +52,18 @@ DATE_COLORS = {
         "overdue": "#f28b82",
     },
 }
+
+# 悬浮操作标签配色：常规操作用蓝色（与主题链接色 #1a73e8 一致），删除用红色危险色。
+# 仅写简单属性（color/padding/...），hover 背景放父容器 actions 的扁平规则里，
+# 因为 Qt QSS 不支持在 widget 内联样式里写 `QLabel:hover { }` 嵌套子规则（会报解析失败）。
+_CHIP_STYLE_BLUE = (
+    "color: #1a73e8; padding: 1px 6px; border-radius: 4px;"
+    " font-size: 12px; background: transparent;"
+)
+_CHIP_STYLE_RED = (
+    "color: #d93025; padding: 1px 6px; border-radius: 4px;"
+    " font-size: 12px; background: transparent;"
+)
 
 
 class _MarqueeLabel(QWidget):
@@ -132,6 +143,30 @@ class _MarqueeLabel(QWidget):
         painter.drawText(x, y, self._text)
 
 
+class _ChipLabel(QLabel):
+    """可点击的小标签按钮（悬浮操作区用）。
+
+    用 QLabel 而非 QPushButton：QLabel 直接绘制文字、紧贴内容，不会像 QPushButton
+    那样被全局 QSS 的 padding 把「完成 / 加入今日 / 删除」文字底部裁掉（与「进行中」
+    徽标同一渲染路径，显示效果一致）。
+    """
+
+    clicked = Signal()
+
+    def __init__(self, text: str = "", parent: QWidget | None = None):
+        super().__init__(text, parent)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+
+    def mousePressEvent(self, event) -> None:
+        self.clicked.emit()
+        super().mousePressEvent(event)
+
+    def click(self) -> None:
+        """兼容 QPushButton 的点击 API（测试与代码调用均按此约定）。"""
+        self.clicked.emit()
+
+
 class TaskItemWidget(QFrame):
     """单条任务的可视单元。"""
 
@@ -194,29 +229,36 @@ class TaskItemWidget(QFrame):
         self.hint_label.setProperty("badge", "hint")
         root.addWidget(self.hint_label, 0, Qt.AlignVCenter)
 
-        # 悬浮操作区
+        # 悬浮操作区：用 QLabel 小标签（_ChipLabel）替代 QPushButton，避免文字被裁
         self.actions = QWidget()
-        # 压缩悬浮按钮内边距，保证单行条目（~26px）悬浮时按钮不被裁切
-        self.actions.setStyleSheet("background: transparent; QPushButton { padding: 2px 6px; }")
+        # hover 背景用扁平规则放父容器（danger 用字符串属性，确保 [danger='true'] 匹配）
+        self.actions.setStyleSheet(
+            "background: transparent;"
+            "QLabel[role='chip']:hover { background: rgba(26,115,232,0.10); }"
+            "QLabel[role='chip'][danger='true']:hover { background: rgba(217,48,37,0.10); }"
+        )
         actions_layout = QHBoxLayout(self.actions)
         actions_layout.setContentsMargins(0, 0, 0, 0)
-        actions_layout.setSpacing(2)
+        actions_layout.setSpacing(4)
 
         # 主操作按钮：待办 → 「开始」，进行中 → 「完成」（同一位置，互斥显示）
-        self.primary_btn = QPushButton("开始")
-        self.primary_btn.setFlat(True)
+        self.primary_btn = _ChipLabel("开始")
+        self.primary_btn.setProperty("role", "chip")
         self.primary_btn.setToolTip("切换为进行中")
+        self.primary_btn.setStyleSheet(_CHIP_STYLE_BLUE)
         self.primary_btn.clicked.connect(self._on_primary_clicked)
         actions_layout.addWidget(self.primary_btn)
 
-        self.today_btn = QPushButton()
-        self.today_btn.setFlat(True)
+        self.today_btn = _ChipLabel()
+        self.today_btn.setProperty("role", "chip")
+        self.today_btn.setStyleSheet(_CHIP_STYLE_BLUE)
         self.today_btn.clicked.connect(lambda: self.add_to_today.emit(self.task.id))
         actions_layout.addWidget(self.today_btn)
 
-        self.delete_btn = QPushButton("删除")
-        self.delete_btn.setFlat(True)
-        self.delete_btn.setProperty("danger", True)
+        self.delete_btn = _ChipLabel("删除")
+        self.delete_btn.setProperty("role", "chip")
+        self.delete_btn.setProperty("danger", "true")
+        self.delete_btn.setStyleSheet(_CHIP_STYLE_RED)
         self.delete_btn.clicked.connect(lambda: self.delete_requested.emit(self.task.id))
         actions_layout.addWidget(self.delete_btn)
 

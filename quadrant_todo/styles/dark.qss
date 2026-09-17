@@ -126,26 +126,23 @@ QPushButton:flat:hover {
     background: #353639;
 }
 
-/* 页签 */
+/* 页签：文字颜色不在此声明，由代码 setTabTextColor 按象限着色（QSS color 会覆盖它） */
 QTabWidget::pane {
     border: none;
     background: transparent;
 }
 QTabBar::tab {
     background: transparent;
-    color: #9aa0a6;
     border: none;
     border-bottom: 2px solid transparent;
     padding: 8px 16px;
     font-size: 13px;
 }
 QTabBar::tab:selected {
-    color: #8ab4f8;
     border-bottom-color: #8ab4f8;
     background: transparent;
 }
 QTabBar::tab:hover:!selected {
-    color: #e8eaed;
     background: #353639;
 }
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import date
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QFrame,
@@ -23,6 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .. import theme
 from ..models import Task
 from ..quadrant import QUADRANT_LABELS, QUADRANT_ORDER, Quadrant
 from ..recurrence import format_period_label, period_range
@@ -185,6 +187,8 @@ class PeriodView(QWidget):
                 widget.set_selected(task.id == selected_id)
             label = f"{quadrant.value} · {QUADRANT_LABELS[quadrant]} ({len(items)})"
             self.tabs.setTabText(idx, label)
+            # 页签文字用象限语义色（与四象限面板标题一致）
+            self.tabs.tabBar().setTabTextColor(idx, QColor(theme.quadrant_color(quadrant.value)))
         self.tabs.setCurrentIndex(current_tab)
 
         # 已完成 (n)：读完成历史（周期任务重置后仍保留）
