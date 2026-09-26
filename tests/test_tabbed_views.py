@@ -30,7 +30,7 @@ class TabbedViewsTest(unittest.TestCase):
             Task(title="Q1 task", due_date=today, importance=True),
             Task(title="Q2 task", due_date=today + timedelta(days=7), importance=True, today_flag=True),
         ]
-        view.render(tasks, today, self._threshold(), None, lambda *_: None, lambda *_: None)
+        view.render(tasks, today, self._threshold(), None)
 
         texts = [view.tabs.tabText(i) for i in range(view.tabs.count())]
         self.assertIn("Q1 · 重要且紧急 (1)", texts)
@@ -48,9 +48,7 @@ class TabbedViewsTest(unittest.TestCase):
         tasks = [
             Task(title="Q3 task", due_date=today, importance=False),
         ]
-        view.render(
-            tasks, today, self._threshold(), None, [], lambda *_: None, lambda *_: None
-        )
+        view.render(tasks, today, self._threshold(), None)
 
         texts = [view.tabs.tabText(i) for i in range(view.tabs.count())]
         self.assertIn("Q3 · 紧急不重要 (1)", texts)
@@ -62,7 +60,7 @@ class TabbedViewsTest(unittest.TestCase):
         view.tabs.setCurrentIndex(2)
 
         tasks = [Task(title="Q1", due_date=today, importance=True)]
-        view.render(tasks, today, self._threshold(), None, lambda *_: None, lambda *_: None)
+        view.render(tasks, today, self._threshold(), None)
 
         self.assertEqual(view.tabs.currentIndex(), 2)
 

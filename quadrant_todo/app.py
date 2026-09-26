@@ -77,6 +77,8 @@ from .views.search import SearchView
 from .views.settings import SettingsDialog, set_autostart
 from .views.stats import StatsView
 from .views.article import ArticleView
+from .views.article_tag_panel import ArticleTagPanel
+from .views.completed import CompletedView
 from .views.sticky import StickyFloater, StickyView
 from .views.tags import TagsView
 from .views.unscheduled import UnscheduledView
@@ -86,14 +88,15 @@ VIEW_INDEX = {
     "board": 0,
     "daily": 1,
     "unscheduled": 2,
-    "period": 3,
-    "calendar": 4,
-    "search": 5,
-    "tags": 6,
-    "sticky": 7,
-    "article": 8,
-    "stats": 9,
-    "heatmap": 10,
+    "completed": 3,
+    "period": 4,
+    "calendar": 5,
+    "search": 6,
+    "tags": 7,
+    "sticky": 8,
+    "article": 9,
+    "stats": 10,
+    "heatmap": 11,
 }
 
 #: 便签底色轮换（PRD F19.2）
@@ -156,6 +159,7 @@ class MainWindow(QMainWindow):
         self.search_include_closed: bool = False
         self.sticky_filter_keyword: str = ""  # 搜索词同时过滤便签页
         self.article_filter_keyword: str = ""  # 文章模块搜索词
+        self.article_tag_filter: str | None = None  # 文章模块标签筛选（tag_id）
         self.active_tag_ids: set[str] = set()
         self._sticky_floaters: dict[str, StickyFloater] = {}
         self._pomodoro: PomodoroTimer | None = None
@@ -292,6 +296,11 @@ class MainWindow(QMainWindow):
         self.unscheduled_btn.clicked.connect(lambda: self.switch_view("unscheduled"))
         nav_layout.addWidget(self.unscheduled_btn)
 
+        self.completed_btn = QPushButton("已完成")
+        self.completed_btn.setCheckable(True)
+        self.completed_btn.clicked.connect(lambda: self.switch_view("completed"))
+        nav_layout.addWidget(self.completed_btn)
+
         # ---- v2.1 导航入口 ----
         self.tags_btn = QPushButton("标签")
         self.tags_btn.setCheckable(True)
@@ -344,6 +353,7 @@ class MainWindow(QMainWindow):
         self.board_view = BoardView()
         self.daily_view = DailyView()
         self.unscheduled_view = UnscheduledView()
+        self.completed_view = CompletedView()
         self.period_view = PeriodView()
         self.calendar_view = CalendarView()
         # v2.1
@@ -358,6 +368,7 @@ class MainWindow(QMainWindow):
             self.board_view,
             self.daily_view,
             self.unscheduled_view,
+            self.completed_view,
             self.period_view,
             self.calendar_view,
             self.search_view,
@@ -373,6 +384,13 @@ class MainWindow(QMainWindow):
         # 右侧详情面板（PRD F5.1）
         self.detail = DetailPanel()
         body_layout.addWidget(self.detail)
+
+        # 右侧文章标签面板：仅在文章视图显示，与详情面板互斥
+        self.article_tag_panel = ArticleTagPanel()
+        self.article_tag_panel.tag_selected.connect(self._on_article_tag_filter)
+        self.article_tag_panel.cleared.connect(self._on_article_tag_filter_clear)
+        self.article_tag_panel.setVisible(False)
+        body_layout.addWidget(self.article_tag_panel)
 
         root.addWidget(body, 1)
 
@@ -407,6 +425,7 @@ class MainWindow(QMainWindow):
             view.task_selected.connect(self.on_task_selected)
 
         self.unscheduled_view.set_due_requested.connect(self._prompt_set_due_date)
+        self.completed_view.task_selected.connect(self.on_task_selected)
 
         # 周期视图（周/月/年待办，PRD F15）
         self.period_view.task_toggled.connect(self.on_task_toggled)
@@ -421,6 +440,7 @@ class MainWindow(QMainWindow):
         # 日历视图（PRD F17）
         self.calendar_view.task_selected.connect(self.on_task_selected)
         self.calendar_view.anchor_changed.connect(self._render_calendar)
+        self.calendar_view.day_double_clicked.connect(self.open_quick_add_for_day)
 
         # 列表聚焦时按回车 → 聚焦详情（F14）。注意：不再用全局 Return 快捷键，
         # 否则会抢走输入框的回车（主键盘 Key_Return），导致无法创建任务。
@@ -559,15 +579,15 @@ class MainWindow(QMainWindow):
         也会显著放大 Qt 对象的析构风险。
         """
         name = self.current_view
-        board_cb = self.on_task_toggled
-        select_cb = self.on_task_selected
 
         if name == "board":
             self.board_view.render(self.tasks, self.today, self.thresholds, self.selected_id)
         elif name == "daily":
-            self.daily_view.render(self.tasks, self.today, self.thresholds, self.selected_id, board_cb, select_cb)
+            self.daily_view.render(self.tasks, self.today, self.thresholds, self.selected_id)
         elif name == "unscheduled":
             self.unscheduled_view.render(self.tasks, self.today, self.thresholds)
+        elif name == "completed":
+            self._render_completed()
         elif name == "period":
             self._render_period()
         elif name == "calendar":
@@ -591,6 +611,15 @@ class MainWindow(QMainWindow):
         self.apply_onboarding_state()
 
     def _render_detail(self) -> None:
+        # 文章视图：右侧改为文章标签面板（点击标签即按标签筛选文章）
+        if self.current_view == "article":
+            self.detail.setVisible(False)
+            self.article_tag_panel.setVisible(True)
+            self._render_article_tags()
+            return
+        self.article_tag_panel.setVisible(False)
+        self.detail.setVisible(True)
+
         task = self._find(self.selected_id) if self.selected_id else None
         if task:
             self.detail.show_task(
@@ -723,11 +752,14 @@ class MainWindow(QMainWindow):
         self.year_btn.setChecked(name == "period" and self.current_period_kind == "year")
         self.calendar_btn.setChecked(name == "calendar")
         self.unscheduled_btn.setChecked(name == "unscheduled")
+        self.completed_btn.setChecked(name == "completed")
         self.tags_btn.setChecked(name == "tags")
         self.heatmap_btn.setChecked(name == "heatmap")
         self.sticky_btn.setChecked(name == "sticky")
         self.article_btn.setChecked(name == "article")
         self.stats_btn.setChecked(name == "stats")
+        # 切换视图后清除任务选中态，右侧详情面板回到空态
+        self.selected_id = None
         # 视图内容按需渲染：切过去时才渲染该页
         self.refresh_views()
 
@@ -765,12 +797,11 @@ class MainWindow(QMainWindow):
     def _render_period(self) -> None:
         from .recurrence import period_range
 
-        start, end = period_range(self.current_period_kind, self.period_view.anchor)
-        completions = self.db.get_completions_in_range(start, end)
-        self.period_view.render(
-            self.tasks, self.today, self.thresholds, self.selected_id,
-            completions, self.on_task_toggled, self.on_task_selected,
-        )
+        self.period_view.render(self.tasks, self.today, self.thresholds, self.selected_id)
+
+    def _render_completed(self) -> None:
+        """已完成视图：全部完成历史倒序。"""
+        self.completed_view.render(self.db.get_all_completions())
 
     def _render_calendar(self) -> None:
         """上/下月切换后仅重渲染日历视图（不改变数据，PRD F17）。"""
@@ -946,13 +977,49 @@ class MainWindow(QMainWindow):
         else:
             articles = self.db.get_articles()
             highlight_kw = None
+
+        # 标签筛选（与关键词为 AND 关系）
+        tag_label = None
+        if self.article_tag_filter:
+            hit_ids = set(self.db.get_article_ids_by_tag(self.article_tag_filter))
+            articles = [a for a in articles if a.id in hit_ids]
+            tag_name = next(
+                (t.name for t in self.db.get_tags() if t.id == self.article_tag_filter),
+                "",
+            )
+            tag_label = f"文章 · 标签「{tag_name}」{len(articles)} 篇"
+
         active_id = getattr(self.article_view, "_selected_id", None)
         self.article_view.render(
             articles,
             keyword=highlight_kw or None,
             all_tags=self.db.get_tags(),
             active_tag_ids=self.db.get_article_tag_ids(active_id) if active_id else [],
+            filter_label=tag_label,
         )
+
+    def _render_article_tags(self) -> None:
+        """右侧面板：文章用到的全部标签 + 各自文章数。"""
+        tags = self.db.get_tags()
+        counts = {t.id: len(self.db.get_article_ids_by_tag(t.id)) for t in tags}
+        used = [t for t in tags if counts[t.id] > 0]
+        self.article_tag_panel.render(
+            used, counts, self.article_tag_filter, total=len(self.db.get_articles())
+        )
+
+    def _on_article_tag_filter(self, tag_id: str) -> None:
+        """点击标签 = 按标签筛选文章；列表与面板一起刷新。"""
+        self.article_tag_filter = tag_id
+        self._render_article()
+        self._render_article_tags()
+
+    def _on_article_tag_filter_clear(self) -> None:
+        """取消标签筛选（点「全部」或再点一次已选中的标签）。"""
+        if self.article_tag_filter is None:
+            return
+        self.article_tag_filter = None
+        self._render_article()
+        self._render_article_tags()
 
     def on_article_add(self, title: str) -> None:
         article = Article(title=title or "无标题文章")
@@ -1087,6 +1154,11 @@ class MainWindow(QMainWindow):
             importance=importance,
         )
         self.reload()
+
+    def open_quick_add_for_day(self, due_date: date) -> None:
+        """双击日历某天：弹出快速添加窗口，截止日期预设为该天。"""
+        self.open_quick_add()
+        self._quick_add.open_with_due(due_date)
 
     def on_task_dropped(self, task_id: str, target_value: str) -> None:
         """F1.8：把拖拽翻译为属性修改，而不是直接改象限。
@@ -1375,16 +1447,24 @@ class MainWindow(QMainWindow):
         self._quick_add.show_and_focus()
 
     def _on_quick_add(self, title: str, importance: bool) -> None:
-        """F2.10：标题中的日期自动识别为截止日期。"""
-        parsed = parse_due_from_title(title, self.today)
-        task = Task(title=parsed.title, importance=importance, due_date=parsed.due_date)
+        """F2.10：标题中的日期自动识别为截止日期；双击日历进入时用预设日期。"""
+        preset = getattr(getattr(self, "_quick_add", None), "preset_due", None)
+        if preset is not None:
+            due = preset  # 双击日历创建：截止日期固定为该天，标题不再二次解析
+            parsed_title = title
+        else:
+            parsed = parse_due_from_title(title, self.today)
+            due = parsed.due_date
+            parsed_title = parsed.title
+        task = Task(title=parsed_title, importance=importance, due_date=due)
         task.sort_order = self.db.next_sort_order()
-        self._apply_default_reminder(task, parsed.due_date)
+        self._apply_default_reminder(task, due)
         self.db.save_task(task)
         self.db.log_event(
             "task_create",
             importance=importance,
-            has_due_date=parsed.due_date is not None,
+            has_due_date=due is not None,
+            source="calendar" if preset is not None else "quickadd",
         )
         self.reload()
 

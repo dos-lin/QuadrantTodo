@@ -241,7 +241,8 @@ class ArticleView(QWidget):
 
     def render(self, articles, keyword: str | None = None,
                all_tags: list[Tag] | None = None,
-               active_tag_ids: list[str] | None = None) -> None:
+               active_tag_ids: list[str] | None = None,
+               filter_label: str | None = None) -> None:
         self._articles = list(articles)
         self._keyword = keyword or ""
         if all_tags is not None:
@@ -249,10 +250,12 @@ class ArticleView(QWidget):
         if active_tag_ids is not None:
             self._active_tag_ids = list(active_tag_ids)
 
-        self.title_label.setText(
-            f"文章 · 「{self._keyword}」匹配 {len(articles)} 篇" if self._keyword
-            else "文章"
-        )
+        if filter_label:  # 标签筛选态：标题显示标签与命中数
+            self.title_label.setText(filter_label)
+        elif self._keyword:
+            self.title_label.setText(f"文章 · 「{self._keyword}」匹配 {len(articles)} 篇")
+        else:
+            self.title_label.setText("文章")
 
         # 重建左侧列表（blockSignals 避免重建时误触发选中）
         self.list_widget.blockSignals(True)

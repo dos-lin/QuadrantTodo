@@ -36,6 +36,7 @@ class QuickAddWindow(QWidget):
         self.setWindowTitle("快速添加任务")
         self.setWindowFlags(Qt.Window | Qt.WindowStaysOnTopHint)
         self.resize(360, 120)
+        self.preset_due: date | None = None  # 双击日历时预设的截止日期
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -64,7 +65,10 @@ class QuickAddWindow(QWidget):
         layout.addWidget(self.hint)
 
     def _update_hint(self, _text: str = "") -> None:
-        """实时预览标题里识别到的截止日期（PRD F2.10）。"""
+        """实时预览截止日期：双击日历预设优先，其次识别标题里的日期（PRD F2.10）。"""
+        if self.preset_due is not None:
+            self.hint.setText(f"截止日期固定为 {self.preset_due.isoformat()}（双击日历设定）")
+            return
         parsed = parse_due_from_title(self.title_edit.text(), date.today())
         if parsed.due_date is None:
             self.hint.setText(_DEFAULT_HINT)
@@ -76,8 +80,16 @@ class QuickAddWindow(QWidget):
         if not title:
             return
         self.submitted.emit(title, self.important_box.isChecked())
+        self.preset_due = None  # 用完即清，避免影响下一次普通快速添加
         self.title_edit.clear()
         self.hide()
+
+    def open_with_due(self, due: date) -> None:
+        """双击日历某天：预设截止日期并弹出。"""
+        self.preset_due = due
+        self.setWindowTitle(f"快速添加任务 · 截止 {due.month}月{due.day}日")
+        self._update_hint()
+        self.show_and_focus()
 
     def eventFilter(self, obj, event) -> bool:
         # 主键盘回车(Key_Return)与小键盘回车(Key_Enter)都创建（PRD F2.9）
@@ -88,6 +100,8 @@ class QuickAddWindow(QWidget):
         return super().eventFilter(obj, event)
 
     def show_and_focus(self) -> None:
+        if self.preset_due is None:
+            self.setWindowTitle("快速添加任务")
         self.show()
         self.raise_()
         self.activateWindow()

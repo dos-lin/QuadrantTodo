@@ -488,6 +488,9 @@ class DetailPanel(QFrame):
         self._note_timer.stop()
         self._pending_title = None
         self._title_timer.stop()
+        # 清空残留文本，避免下次显示时闪现上一次的任务内容
+        self.title_edit.setPlainText("")
+        self.note_edit.setPlainText("")
 
     def show_task(
         self,

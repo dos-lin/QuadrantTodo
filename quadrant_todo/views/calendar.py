@@ -95,15 +95,22 @@ class _DayChip(QFrame):
         self.clicked.emit(self.task.id)
         super().mousePressEvent(event)
 
+    def mouseDoubleClickEvent(self, event) -> None:
+        # 双击任务条不冒泡到日期格，避免误触「该天创建」
+        event.accept()
+
 
 class _DayCell(QFrame):
     """日历中的一个日期格。"""
 
     task_selected = Signal(str)
+    #: 双击日期格，携带该天日期（app 层弹出快速添加窗口）
+    day_double_clicked = Signal(object)
 
     def __init__(self, day: date, today: date, parent: QWidget | None = None):
         super().__init__(parent)
         self.day = day
+        self.setToolTip("双击创建截止日期为这天的待办")
         self.setFrameShape(QFrame.StyledPanel)
         self.setProperty("role", "cal-cell")
         if day == today:
@@ -153,11 +160,17 @@ class _DayCell(QFrame):
             more.setStyleSheet("font-size: 11px; padding-left: 4px;")
             self.chips_layout.addWidget(more)
 
+    def mouseDoubleClickEvent(self, event) -> None:
+        self.day_double_clicked.emit(self.day)
+        super().mouseDoubleClickEvent(event)
+
 
 class CalendarView(QWidget):
     """月历视图（PRD F17）。"""
 
     task_selected = Signal(str)
+    #: 双击某天，携带该天日期（app 层弹出快速添加窗口）
+    day_double_clicked = Signal(object)
     anchor_changed = Signal()  # 上/下月切换后，请求 app 层重渲染
 
     def __init__(self, parent: QWidget | None = None):
@@ -247,6 +260,7 @@ class CalendarView(QWidget):
         while day <= grid_end:
             cell = _DayCell(day, today, self)
             cell.task_selected.connect(self.task_selected)
+            cell.day_double_clicked.connect(self.day_double_clicked)
             cell.fill(by_day.get(day, []), today, threshold)
             self.grid.addWidget(cell, row, col)
             col += 1

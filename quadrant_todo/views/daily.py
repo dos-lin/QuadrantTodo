@@ -1,7 +1,8 @@
 """日待办视图（PRD F4）。
 
 生成规则见 F4.2（由 quadrant.is_in_daily_todo 判定），按象限分组 Q1→Q2→Q3→Q4，
-空分组隐藏（F4.4），底部「今日已完成 (n)」折叠分组（F4.9）。
+空分组隐藏（F4.4）。原底部「今日已完成」折叠分组已移除（2026-09-25 用户决策），
+已完成统一集中在左侧「已完成」独立视图展示。
 """
 
 from __future__ import annotations
@@ -70,17 +71,6 @@ class DailyView(QWidget):
             self._lists[quadrant.value] = list_widget
         root.addWidget(self.tabs, 1)
 
-        self.done_label = QLabel("今日已完成 (0)")
-        self.done_label.setProperty("role", "section-title")
-        root.addWidget(self.done_label)
-
-        self.done_list = QListWidget()
-        self.done_list.setFrameShape(QFrame.NoFrame)
-        self.done_list.setSpacing(2)
-        self.done_list.setDragDropMode(QAbstractItemView.NoDragDrop)
-        self.done_list.setMaximumHeight(180)
-        root.addWidget(self.done_list)
-
     def eventFilter(self, obj, event) -> bool:
         # 仅当列表自身有焦点时，回车=聚焦详情（F14），不拦截输入框
         if event.type() == event.Type.KeyPress and event.key() in (Qt.Key_Return, Qt.Key_Enter):
@@ -100,24 +90,16 @@ class DailyView(QWidget):
         today: date,
         threshold: int,
         selected_id: str | None,
-        on_done_toggle,
-        on_select,
     ) -> None:
         self.header_label.setText(f"日待办 · {today.strftime('%Y年%m月%d日')}")
 
         grouped: dict[str, list[Task]] = {q.value: [] for q in QUADRANT_ORDER}
-        done: list[Task] = []
-        pending: list[Task] = []
 
         for task in tasks:
-            if task.status == "done":
-                if task.completed_today(today):
-                    done.append(task)
-                continue
-            if task.status == "abandoned":
+            if task.status in ("done", "abandoned"):
+                # 已完成集中在「已完成」独立视图展示（2026-09-25 用户决策）
                 continue
             if task.in_daily_todo(today):
-                pending.append(task)
                 grouped[task.quadrant(today, threshold).value].append(task)
 
         # 始终显示 4 个 Q1-Q4 页签，空象限显示 (0)；总览空提示仅在 4 象限全空时补充
@@ -148,16 +130,3 @@ class DailyView(QWidget):
             # 页签文字用象限语义色（与四象限面板标题一致）
             self.tabs.tabBar().setTabTextColor(idx, QColor(theme.quadrant_color(quadrant.value)))
         self.tabs.setCurrentIndex(current_tab)
-
-        self.done_label.setText(f"今日已完成 ({len(done)})")
-        self.done_label.setVisible(bool(done))
-        self.done_list.setVisible(bool(done))
-        self.done_list.clear()
-        for task in done:
-            item = QListWidgetItem(self.done_list)
-            widget = TaskItemWidget(task, today, threshold, self.done_list)
-            widget.toggled.connect(on_done_toggle)
-            widget.clicked.connect(on_select)
-            item.setSizeHint(widget.sizeHint())
-            self.done_list.addItem(item)
-            self.done_list.setItemWidget(item, widget)

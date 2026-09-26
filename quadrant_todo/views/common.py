@@ -25,6 +25,10 @@ def clear_layout(layout: QLayout) -> None:
             continue
         widget = item.widget()
         if widget is not None:
+            # 必须先隐藏再脱离父级：对已显示的控件直接 setParent(None)，
+            # Qt 会立刻把它提升为顶层窗口并保持可见，直到 deleteLater 生效，
+            # 表现为重绘瞬间闪出一个小窗并抢焦点（用户反馈 2026-09-19）。
+            widget.setVisible(False)
             widget.setParent(None)
             widget.deleteLater()
             continue

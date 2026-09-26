@@ -2,7 +2,8 @@
 
 与日待办同源：均为对全部任务的筛选视图，不引入新数据源。
 F15.2 口径：仅按 dueDate 落在时段内且未关闭筛选，不含 todayFlag 覆盖项与无日期任务。
-F15.6：「已完成 (n)」折叠分组读 `task_completion`（周期任务重置后不丢失）。
+原底部「已完成 (n)」折叠分组已移除（2026-09-25 用户决策），
+已完成统一集中在左侧「已完成」独立视图展示。
 """
 
 from __future__ import annotations
@@ -108,18 +109,6 @@ class PeriodView(QWidget):
             self._lists[quadrant.value] = list_widget
         root.addWidget(self.tabs, 1)
 
-        # 已完成 (n) 折叠分组（F15.6）
-        self.done_label = QLabel("已完成 (0)")
-        self.done_label.setProperty("role", "section-title")
-        root.addWidget(self.done_label)
-
-        self.done_list = QListWidget()
-        self.done_list.setFrameShape(QFrame.NoFrame)
-        self.done_list.setSpacing(2)
-        self.done_list.setDragDropMode(QAbstractItemView.NoDragDrop)
-        self.done_list.setMaximumHeight(180)
-        root.addWidget(self.done_list)
-
     def eventFilter(self, obj, event) -> bool:
         if event.type() == event.Type.KeyPress and event.key() in (Qt.Key_Return, Qt.Key_Enter):
             for list_widget in self._lists.values():
@@ -146,20 +135,15 @@ class PeriodView(QWidget):
         today: date,
         threshold: int,
         selected_id: str | None,
-        completions: list[dict],
-        on_done_toggle,
-        on_select,
     ) -> None:
         start, end = period_range(self.kind, self.anchor)
         self.label.setText(format_period_label(self.kind, self.anchor))
 
         grouped: dict[str, list[Task]] = {q.value: [] for q in QUADRANT_ORDER}
-        pending: list[Task] = []
         for task in tasks:
             if task.is_closed or task.due_date is None:
                 continue
             if start <= task.due_date < end:
-                pending.append(task)
                 grouped[task.quadrant(today, threshold).value].append(task)
 
         # 始终显示 4 个 Q1-Q4 页签，空象限显示 (0)；总览空提示仅在 4 象限全空时补充
@@ -190,45 +174,3 @@ class PeriodView(QWidget):
             # 页签文字用象限语义色（与四象限面板标题一致）
             self.tabs.tabBar().setTabTextColor(idx, QColor(theme.quadrant_color(quadrant.value)))
         self.tabs.setCurrentIndex(current_tab)
-
-        # 已完成 (n)：读完成历史（周期任务重置后仍保留）
-        self.done_label.setText(f"已完成 ({len(completions)})")
-        self.done_label.setVisible(bool(completions))
-        self.done_list.setVisible(bool(completions))
-        self.done_list.clear()
-        for rec in completions:
-            item = QListWidgetItem(self.done_list)
-            widget = _CompletionItem(rec)
-            item.setSizeHint(widget.sizeHint())
-            self.done_list.addItem(item)
-            self.done_list.setItemWidget(item, widget)
-            widget.clicked.connect(lambda tid=rec["task_id"]: on_select(tid))
-
-
-class _CompletionItem(QFrame):
-    """已完成历史中的一条记录（标题 + 完成时间，点击定位任务）。"""
-
-    clicked = Signal(str)
-
-    def __init__(self, record: dict, parent: QWidget | None = None):
-        super().__init__(parent)
-        self.setFrameShape(QFrame.NoFrame)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 4, 8, 4)
-        layout.setSpacing(8)
-
-        title = QLabel(record.get("title", ""))
-        title.setWordWrap(False)
-        layout.addWidget(title, 1)
-
-        when = QLabel(record.get("completed_at", "")[:16].replace("T", " "))
-        when.setProperty("role", "meta")
-        layout.addWidget(when)
-
-        self.setCursor(Qt.PointingHandCursor)
-        self._task_id = record.get("task_id")
-
-    def mousePressEvent(self, event) -> None:
-        if self._task_id:
-            self.clicked.emit(self._task_id)
-        super().mousePressEvent(event)

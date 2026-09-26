@@ -297,6 +297,29 @@ class Database:
             for r in cur.fetchall()
         ]
 
+    def get_all_completions(self) -> list[dict]:
+        """全部完成记录，倒序（已完成视图专用，2026-09-25）。
+
+        除完成时间外一并返回任务创建时间，供「待办内容 / 创建时间 / 完成时间」三列展示。
+        """
+        assert self.conn is not None
+        cur = self.conn.execute(
+            "SELECT c.task_id, c.completed_at, c.cycle_seq, t.title, t.created_at "
+            "FROM task_completion c LEFT JOIN task t ON t.id = c.task_id "
+            "WHERE t.title IS NOT NULL "
+            "ORDER BY c.completed_at DESC"
+        )
+        return [
+            {
+                "task_id": r["task_id"],
+                "completed_at": r["completed_at"],
+                "cycle_seq": r["cycle_seq"],
+                "title": r["title"],
+                "created_at": r["created_at"],
+            }
+            for r in cur.fetchall()
+        ]
+
     # ------------------------------------------------------------ 时段 / 日历视图查询
 
     def tasks_in_period(self, kind: str, anchor: date) -> list[Task]:
@@ -549,6 +572,14 @@ class Database:
             "SELECT tag_id FROM article_tag WHERE article_id = ?", (article_id,)
         )
         return [r["tag_id"] for r in cur.fetchall()]
+
+    def get_article_ids_by_tag(self, tag_id: str) -> list[str]:
+        """带该标签的文章 id 列表（文章视图按标签筛选用）。"""
+        assert self.conn is not None
+        cur = self.conn.execute(
+            "SELECT article_id FROM article_tag WHERE tag_id = ?", (tag_id,)
+        )
+        return [r["article_id"] for r in cur.fetchall()]
 
     def get_article_tag_names(self, article_id: str) -> list[str]:
         """文章导出的标签名列表（按名称排序）。"""
